@@ -28,16 +28,46 @@ CHUNK_MB = 50
 DEFAULT_LIMIT_MB = 0  # 0 = без ограничения (весь корпус)
 
 
+def _extract_text(record) -> str:
+    """Достаёт поле 'text' из записи mlcroissant/datasets устойчиво.
+
+    mlcroissant отдаёт dict, но ключ зависит от версии схемы:
+      * v0:            record["text"]   (имя поля)
+      * новая схема:   record["default/text"]  или UUID вида record[".../text"]
+    Плюс поле может быть вложено в dict ({"/text": {...}}).
+    """
+    if not isinstance(record, dict):
+        # на случай, если отдают не dict, а объект строки — пробуем атрибуты
+        return str(getattr(record, "text", "") or "").strip()
+
+    for key in ("text", "/text", "default/text"):
+        v = record.get(key)
+        if isinstance(v, str):
+            return v.strip()
+        if isinstance(v, dict):
+            # вложенный словарь: ищем любое строковое значение внутри
+            for inner in v.values():
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+
+    # fallback: любой ключ, оканчивающийся на 'text'
+    for key, val in record.items():
+        if str(key).endswith("text") and isinstance(val, str):
+            return val.strip()
+        if str(key).endswith("text") and isinstance(val, dict):
+            for inner in val.values():
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+    return ""
+
+
 def iter_texts_datasets(limit_mb: int):
     from datasets import load_dataset
     ds = load_dataset("Imperius/ru-classic", split="train", streaming=True)
-    for i, row in enumerate(ds):
-        text = str(row.get("text", "")).strip()
+    for row in ds:
+        text = _extract_text(row)
         if text:
             yield text
-        if limit_mb and (i + 1) % 100000 == 0:
-            # грубая честная оценка по числу строк (не идеально, но просто)
-            pass
 
 
 def iter_texts_croissant(limit_mb: int):
@@ -50,7 +80,7 @@ def iter_texts_croissant(limit_mb: int):
         )
     ds = Dataset(jsonld="https://huggingface.co/api/datasets/Imperius/ru-classic/croissant")
     for record in ds.records("default"):
-        text = str(record.get("text", "")).strip()
+        text = _extract_text(record)
         if text:
             yield text
 
@@ -80,6 +110,7 @@ def main() -> int:
     part = 0
     written = 0
     total = 0
+    chunk_roof = args.chunk_mb * 1024 * 1024
     records = 0
     f = open_next(part)
     try:
@@ -90,9 +121,10 @@ def main() -> int:
             written += n
             total += n
             records += 1
-            if limit_bytes and written >= limit_bytes:
+            # честная обрезка по объёму: --limit-mb 20 остановит на ~20 МБ
+            if limit_bytes and total >= limit_bytes:
                 break
-            if written >= args.chunk_mb * 1024 * 1024:
+            if written >= chunk_roof:
                 f.close()
                 part += 1
                 written = 0
@@ -103,7 +135,7 @@ def main() -> int:
     except Exception as exc:
         f.close()
         print(f"\n[!] Ошибка: {exc.__class__.__name__}: {exc}")
-        print("    Проверь интернет (нужен доступ к huggingface.co).")
+        print("    Проверь интернет (нужен доступ к huggingface.co) и версию библиотек.")
         return 1
     finally:
         try:
