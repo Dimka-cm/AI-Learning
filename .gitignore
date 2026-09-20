@@ -1,7 +1,36 @@
 __pycache__/
 *.pyc
+*.egg-info/
+.venv/
+venv/
+.DS_Store
+
+# Большие артефакты — не кладём в git
+data/raw/*
+data/shards/*
+checkpoints/*
+logs/*
+models/*
+
+# Но оставляем сами папки
+!data/raw/.gitkeep
+!data/shards/.gitkeep
+!checkpoints/.gitkeep
+!logs/.gitkeep
+!models/.gitkeep
+
+*.bin
+*.pt
+*.pth
+*.jsonl
+progress.svg
+
+# Память агента (история/знания) — локальное состояние, не в git
+agent/memory/
+AgentWorkspace/
+
+# --- Проект «Глаза для UE5» (из main) ---
 assets/ue5/
 refs/
-*.pt
 !ui_vision.pt
 preview.png
