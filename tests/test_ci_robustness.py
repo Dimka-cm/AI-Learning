@@ -141,3 +141,19 @@ def test_drive_size_parser_understands_large_parts():
     assert _parse_size_bytes("25мб") == 25 * 1024 * 1024
     assert _drive_file_size(SimpleNamespace(size="6.5 GB")) == int(6.5 * 1024 ** 3)
     assert _drive_file_size(SimpleNamespace(name="part.txt")) is None
+
+
+def test_drive_filter_selects_one_part_naturally():
+    from steps.step_00_ci_data import _filter_drive_txts
+    from types import SimpleNamespace
+
+    files = [
+        SimpleNamespace(name="part_10.txt"),
+        SimpleNamespace(name="notes.md"),
+        SimpleNamespace(name="part_2.txt"),
+        SimpleNamespace(name="part_1.txt"),
+    ]
+
+    assert [f.name for f in _filter_drive_txts(files)] == ["part_1.txt", "part_2.txt", "part_10.txt"]
+    assert [f.name for f in _filter_drive_txts(files, include_regex="part_2", max_files=1)] == ["part_2.txt"]
+    assert _filter_drive_txts(files, include_regex="missing") == []

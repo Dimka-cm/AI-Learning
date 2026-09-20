@@ -81,7 +81,7 @@
 
 Workflow: **«Дообучение в Actions»**.
 
-Рекомендуемые inputs:
+Рекомендуемые inputs для общего smoke на HF:
 
 ```text
 data_source: hf
@@ -91,6 +91,23 @@ start_step: 1
 end_step: 2
 max_steps: 300
 ```
+
+Рекомендуемые inputs для прогона **одной части** Drive-корпуса:
+
+```text
+data_source: drive
+drive_folder_url: <ссылка на папку Drive>
+drive_file_regex: part_01        # или уникальный кусок имени нужного .txt
+drive_max_files: 1
+data_limit_mb: 1200             # больше размера выбранной части; для последней можно 500
+drive_budget_s: 3600
+start_step: 1
+end_step: 2
+max_steps: 300
+```
+
+Если имена частей другие, `drive_file_regex` должен совпадать с именем нужного `.txt`.
+Например: `07`, `часть_7`, `book-final`, `part_7`.
 
 Успех первого прогона:
 
