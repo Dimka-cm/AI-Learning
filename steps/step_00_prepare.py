@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -89,6 +90,11 @@ def main() -> int:
             targets[s] += len(buffer[s])
             buffer[s].clear()
 
+    # печатаем прогресс: на большом корпусе (гигабайты) иначе непонятно,
+    # работает шаг или завис
+    lines_done = 0
+    started = time.time()
+
     for path, lo, hi in files:
         try:
             fh = open(path, "r", encoding="utf-8", errors="replace")
@@ -96,6 +102,7 @@ def main() -> int:
             print(f"[warn] пропуск {path}: {ex}")
             continue
         span = hi - lo + 1
+        file_lines = 0
         with fh:
             for i, line in enumerate(fh):
                 line = line.strip()
@@ -107,6 +114,13 @@ def main() -> int:
                 buffer[s].extend(ids)
                 if len(buffer[s]) > 500_000:
                     flush(s)
+                file_lines += 1
+                lines_done += 1
+                if lines_done % 200_000 == 0:
+                    mins = (time.time() - started) / 60
+                    print(f"[token] строк {lines_done:,} за {mins:.1f} мин "
+                          f"({lines_done / max(mins, 1e-6) / 1000:.0f} тыс. строк/мин)", flush=True)
+        print(f"[token] {os.path.basename(path)}: {file_lines:,} строк", flush=True)
 
     for s in range(1, cfg.shards + 1):
         flush(s)
