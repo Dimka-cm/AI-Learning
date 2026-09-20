@@ -41,6 +41,21 @@ on:
         required: false
         default: "0"
         type: string
+      data_source:
+        description: "Откуда данные: auto / demo (быстро) / drive / hf"
+        required: true
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - demo
+          - drive
+          - hf
+      data_limit_mb:
+        description: "Потолок объёма данных, МБ (0 = без потолка)"
+        required: false
+        default: "25"
+        type: string
   push:
     branches: [main]
     paths:
@@ -57,11 +72,20 @@ concurrency:
 env:
   HF_HOME: ${{ github.workspace }}/hf-cache
   TORCH_HOME: ${{ github.workspace }}/torch-cache
-  MAX_STEPS: ${{ github.event.inputs.max_steps || '0' }}
+  # По push — короткий смоук (40 итераций), руками — можно полный прогон.
+  MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'push' && '40' || '0') }}
+  # По push данных в свежем чекауте нет: демо-корпус, чтобы пайплайн доехал.
+  DATA_SOURCE: ${{ github.event.inputs.data_source || (github.event_name == 'push' && 'demo' || 'auto') }}
+  LIMIT_MB: ${{ github.event.inputs.data_limit_mb || '25' }}
 
 jobs:
   train:
-    runs-on: ${{ github.event.inputs.runner || 'self-hosted' }}
+    # ВАЖНО: по push в workflow нет inputs, поэтому `inputs.runner` пустой.
+    # Раньше подставлялся self-hosted, и джоба висела в очереди до таймаута
+    # (350 мин), потому что раннер на ноуте не зарегистрирован.
+    # Теперь: руками с кнопки -> self-hosted (значение по умолчанию),
+    # по push -> обычный ubuntu-latest и короткий смоук.
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 350
 
     steps:
@@ -78,17 +102,20 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Prepare data (if any .txt present)
-        run: python orchestrator.py --prepare --device cpu --gpu ""
+      - name: Данные (свои .txt / Drive / HF / демо) + токенизация
+        # Раньше здесь был `--prepare`: на свежем чекауте данных нет, и шаги
+        # падали с FileNotFoundError. Теперь данные гарантированно находятся.
+        timeout-minutes: 30
+        run: python steps/step_00_ci_data.py
         env:
           CUDA_VISIBLE_DEVICES: ""
 
-      - name: Train steps ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || 10 }}
+      - name: Train steps ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || (github.event_name == 'push' && 2 || 10) }}
         run: >
           python orchestrator.py
           --start ${{ github.event.inputs.start_step || 1 }}
-          --end ${{ github.event.inputs.end_step || 10 }}
-          --epochs ${{ github.event.inputs.epochs || 3 }}
+          --end ${{ github.event.inputs.end_step || (github.event_name == 'push' && 2 || 10) }}
+          --epochs ${{ github.event.inputs.epochs || (github.event_name == 'push' && 1 || 3) }}
           --device auto
           --gpu ${{ github.event.inputs.gpu_index || 'auto' }}
           --evaluate
@@ -122,6 +149,9 @@ jobs:
               last=$(python -c "import json,sys;d=[json.loads(l) for l in open('$f')];e=[x for x in d if x.get('event')=='train'];print(e[-1]['loss'] if e else '-')" 2>/dev/null)
               echo "| \`$(basename "$f")\` | $first → $last |"
             done
+            echo ""
+            echo "Источник данных написан в шаге «Данные …» выше."
+            echo "По push идёт короткий смоук (40 итераций, шаги 1..2); полный прогон — кнопкой Run workflow."
             echo ""
             echo "График и логи — в артефакте \`training-progress\`."
           } >> "$GITHUB_STEP_SUMMARY"
