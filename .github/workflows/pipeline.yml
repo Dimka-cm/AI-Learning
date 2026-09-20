@@ -81,6 +81,9 @@ env:
   HF_HOME: ${{ github.workspace }}/hf-cache
   TORCH_HOME: ${{ github.workspace }}/torch-cache
   GRAD_CACHE: ${{ github.workspace }}/grad-cache
+  # Если в настройках репозитория добавлен секрет HF_TOKEN, скачивание с
+  # HuggingFace идёт быстрее и без предупреждений о лимите. Пусто — не мешает.
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
 jobs:
   finetune:
@@ -134,14 +137,15 @@ jobs:
           MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'pull_request' && '60' || '0') }}
           EPOCHS_PER_STEP: "1"
           LOG_EVERY_STEPS: "5"
-          NUM_WORKERS: "auto"
-          OMP_NUM_THREADS: "auto"
+          # ВАЖНО: NUM_WORKERS может быть "auto" (наша договорённость),
+          # а OMP_NUM_THREADS — НЕТ: libgomp понимает только число и падал
+          # с «Недопустимое значение переменной окружения OMP_NUM_THREADS».
         run: |
           NPROC=$(nproc)
-          # auto => все ядра раннера (2 на приватном, 4 на публичном)
-          echo "OMP_NUM_THREADS=$NPROC" >> "$GITHUB_ENV"
-          echo "NUM_WORKERS=$NPROC" >> "$GITHUB_ENV"
           echo "Раннер: $NPROC ядер CPU, $(free -m | awk '/Mem:/{print $2}') МБ RAM"
+          # Число потоков считаем здесь же и передаём дальше уже числом.
+          export OMP_NUM_THREADS=$NPROC
+          export NUM_WORKERS=auto
           python orchestrator.py \
             --start ${{ github.event.inputs.start_step || 1 }} \
             --end ${{ github.event.inputs.end_step || 2 }} \

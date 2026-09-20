@@ -159,9 +159,15 @@ def main() -> int:
             fetch_hf(name, limit_mb)
 
     if not has_txt(RAW):
-        report("[data] сырых .txt нет — генерирую демо-корпус (офлайн)")
-        from scripts.make_data import main as make_demo
-        make_demo()
+        # Масштаб важен: при scale=1 демо-корпус даёт ~230 токенов на порцию,
+        # а модели для одного окна нужно block_size+2. Отсюда была ошибка
+        # «Слишком мало токенов в shard_01: 232 < block_size+2».
+        scale = os.environ.get("DATA_SCALE", "20")
+        report(f"[data] сырых .txt нет — генерирую демо-корпус (офлайн, масштаб x{scale})")
+        rc = subprocess.call([sys.executable, "scripts/make_data.py", "--scale", str(scale)], cwd=ROOT)
+        if rc != 0:
+            report(f"[data] make_data.py упал с кодом {rc}")
+            return 1
 
     n, size = count_txt(RAW)
     report(f"[data] итого сырья: {n} файлов, {size / 1e6:.1f} МБ")

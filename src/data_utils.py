@@ -14,9 +14,27 @@ def token_id_dtype(cfg: CFG):
     return np.uint32 if cfg.dtype == "uint32" else np.uint16
 
 
+def shard_path(cfg: CFG, step: int) -> str:
+    return cfg.p(cfg.tokenized_dir, f"shard_{step:02d}.bin")
+
+
+def shard_token_count(cfg: CFG, step: int) -> int:
+    """Сколько токенов в порции. 0 — файла нет или он пустой."""
+    p = shard_path(cfg, step)
+    if not os.path.exists(p):
+        return 0
+    return int(os.path.getsize(p) // np.dtype(token_id_dtype(cfg)).itemsize)
+
+
 def load_shard(cfg: CFG, step: int) -> np.ndarray:
-    """Читает токенизированную порцию шага (data/shards/shard_XX.bin) в память."""
-    p = cfg.p(cfg.tokenized_dir, f"shard_{step:02d}.bin")
+    """Читает токенизированную порцию шага (data/shards/shard_XX.bin) в память.
+
+    Если порция меньше, чем нужно для одного окна обучения (block_size + 2),
+    данные повторяются до нужного размера, с предупреждением в лог. Так демо-корпус
+    и маленькие домены не валят прогон: «Слишком мало токенов: 232 < 258» больше
+    не роняет шаг — модель просто несколько раз увидит один и тот же кусок.
+    """
+    p = shard_path(cfg, step)
     if not os.path.exists(p):
         raise FileNotFoundError(
             f"Нет {p}. Сначала запусти steps/step_00_prepare.py "
@@ -25,8 +43,21 @@ def load_shard(cfg: CFG, step: int) -> np.ndarray:
     arr = np.fromfile(p, dtype=token_id_dtype(cfg))
     if arr.ndim != 1:
         arr = arr.reshape(-1)
-    if arr.size < cfg.block_size + 2:
-        raise ValueError(f"Слишком мало токенов в shard_{step:02d}: {arr.size} < block_size+2")
+
+    need = cfg.block_size + 2
+    if arr.size == 0:
+        raise ValueError(
+            f"Порция shard_{step:02d} пустая: в ней нет ни одного токена.\n"
+            f"  Причина: для этого домена не нашлось .txt в {cfg.text_dir}/.\n"
+            f"  Что делать: положи текст в нужную папку домена и запусти "
+            f"python steps/step_00_prepare.py заново."
+        )
+    if arr.size < need:
+        reps = int(np.ceil(need / arr.size))
+        print(f"[data] в shard_{step:02d} всего {arr.size} токенов — меньше окна "
+              f"({need}). Повторяю данные x{reps}, чтобы обучение прошло. "
+              f"Для качества добавь текста (см. docs/DATA.md).")
+        arr = np.tile(arr, reps)
     return arr
 
 

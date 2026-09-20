@@ -73,7 +73,7 @@ def main() -> int:
     legacy = sorted(
         os.path.join(raw_dir, f) for f in os.listdir(raw_dir)
         if f.endswith(".txt") and os.path.isfile(os.path.join(raw_dir, f))
-    )
+    ) if os.path.isdir(raw_dir) else []
     if legacy:
         print(f"[legacy] {len(legacy)} файлов в корне data/raw -> round-robin")
         for p in legacy:
@@ -125,10 +125,25 @@ def main() -> int:
     for s in range(1, cfg.shards + 1):
         flush(s)
 
-    print("\n[токенов в порции]")
+    need = cfg.block_size + 2  # ровно столько нужно для одного окна обучения
+    print(f"\n[токенов в порции] (для обучения нужно минимум {need:,})")
+    small = []
     for s in range(1, cfg.shards + 1):
         mb = targets[s] * np.dtype(npdtype).itemsize / 1e6
-        print(f"  shard_{s:02d}: {targets[s]:,} токенов ({mb:.1f} MB)")
+        mark = ""
+        if targets[s] == 0:
+            mark = "  <- пусто: нет .txt для этого домена"
+            small.append(s)
+        elif targets[s] < need:
+            mark = f"  <- мало (меньше {need:,}): данные будут повторены"
+            small.append(s)
+        print(f"  shard_{s:02d}: {targets[s]:,} токенов ({mb:.1f} MB){mark}")
+
+    if small:
+        print("\n[!] Не все порции готовы к обучению. Домены по порциям:")
+        for domain, (lo, hi) in DOMAIN_SHARDS.items():
+            print(f"    {domain}: порции {lo}..{hi}")
+        print("    Добавь .txt в нужную папку data/raw/<домен>/ и запусти шаг заново.")
     return 0
 
 
