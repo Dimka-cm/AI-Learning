@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -60,6 +61,48 @@ def report(msg: str) -> None:
 
 # ------------------------------------------------------------------ Drive
 
+
+
+def _parse_size_bytes(value) -> int | None:
+    """Пытается прочитать размер файла из объекта gdown/строки.
+
+    gdown в разных версиях может отдавать размер как int, float или строку
+    вроде ``"460 MB"``/``"1.2GB"``. Если размер неизвестен — None.
+    """
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value >= 0 else None
+    text = str(value).strip().replace(",", ".")
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b?|байт|кб|мб|гб)\s*$", text, re.IGNORECASE)
+    if not m:
+        return None
+    n = float(m.group(1))
+    unit = m.group(2).lower()
+    mul = 1
+    if unit in ("k", "kb", "kib", "кб"):
+        mul = 1024
+    elif unit in ("m", "mb", "mib", "мб"):
+        mul = 1024 ** 2
+    elif unit in ("g", "gb", "gib", "гб"):
+        mul = 1024 ** 3
+    elif unit in ("t", "tb", "tib"):
+        mul = 1024 ** 4
+    return int(n * mul)
+
+
+def _drive_file_size(f) -> int | None:
+    """Размер файла Drive, если gdown смог его вернуть."""
+    for attr in ("size", "size_bytes", "bytes", "file_size", "filesize"):
+        n = _parse_size_bytes(getattr(f, attr, None))
+        if n is not None:
+            return n
+    return None
+
 def _rel_name(f) -> str:
     """Путь файла внутри папки Drive (без выхода за пределы каталога)."""
     raw = getattr(f, "path", None) or getattr(f, "name", "") or ""
@@ -94,6 +137,8 @@ def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int) -> int:
 
     got = 0
     taken = 0
+    skipped_big = 0
+    unknown_size = 0
     for f in txts:
         if limit and got >= limit:
             report(f"[data] потолок {limit_mb} МБ достигнут — остальные файлы не качаю")
@@ -101,18 +146,41 @@ def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int) -> int:
         if time.time() - started > budget_s:
             report(f"[data] вышло время на Drive ({budget_s} с) — дальше без него")
             break
+
+        name = getattr(f, "name", "?")
+        size = _drive_file_size(f)
+        remaining = limit - got if limit else 0
+        if limit and size is not None and size > remaining:
+            skipped_big += 1
+            report(
+                f"[data] пропускаю {name}: {size / 1e6:.1f} МБ больше "
+                f"остатка лимита {remaining / 1e6:.1f} МБ"
+            )
+            continue
+        if limit and size is None:
+            unknown_size += 1
+            report(f"[data] размер {name} неизвестен — скачаю, но лимит проверю после файла")
+
         dst = os.path.join(out_dir, _rel_name(f))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
             gdown.download(id=getattr(f, "id"), output=dst, quiet=True)
         except Exception as exc:
-            report(f"[data] не скачался {getattr(f, 'name', '?')}: {type(exc).__name__}")
+            report(f"[data] не скачался {name}: {type(exc).__name__}")
             continue
         if os.path.exists(dst):
             got += os.path.getsize(dst)
             taken += 1
 
     report(f"[data] с Drive скачано: {taken} файлов, {got / 1e6:.1f} МБ")
+    if skipped_big:
+        report(
+            f"[data] пропущено больших .txt: {skipped_big}. "
+            f"Если все части корпуса по сотни МБ/ГБ, для smoke сделай отдельный "
+            f"маленький .txt или подними data_limit_mb выше размера нужной части."
+        )
+    if unknown_size:
+        report(f"[data] файлов с неизвестным размером: {unknown_size}")
     return got
 
 

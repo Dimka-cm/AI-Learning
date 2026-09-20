@@ -130,3 +130,14 @@ def test_num_workers_auto_is_a_number():
 
     assert isinstance(cfg.num_workers, int)
     assert cfg.num_workers == default_threads()
+
+
+def test_drive_size_parser_understands_large_parts():
+    from steps.step_00_ci_data import _drive_file_size, _parse_size_bytes
+    from types import SimpleNamespace
+
+    assert _parse_size_bytes("460 MB") == 460 * 1024 * 1024
+    assert _parse_size_bytes("1.5 GB") == int(1.5 * 1024 ** 3)
+    assert _parse_size_bytes("25мб") == 25 * 1024 * 1024
+    assert _drive_file_size(SimpleNamespace(size="6.5 GB")) == int(6.5 * 1024 ** 3)
+    assert _drive_file_size(SimpleNamespace(name="part.txt")) is None
