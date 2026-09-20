@@ -88,6 +88,7 @@ jobs:
               env.write(f'EVAL_LIMIT={fields["eval_limit"]}\n')
               env.write('EPOCHS_PER_STEP=1\n')
               env.write('LOG_EVERY_STEPS=5\n')
+              env.write('REQUIRE_REAL_DATA=1\n')
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               for k, v in fields.items():

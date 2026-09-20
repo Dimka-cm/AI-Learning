@@ -110,30 +110,59 @@ def _natural_key(text: str) -> list[object]:
     return [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", text)]
 
 
+def _drive_text(f) -> str:
+    """Читаемое имя объекта Drive из разных версий gdown.
+
+    В gdown 6 `skip_download=True` возвращает namedtuple с полями
+    `id`, `path`, `local_path`, а не объект с `.name`. Поэтому старый код видел
+    7 объектов, но 0 `.txt` и падал в демо-корпус.
+    """
+    if isinstance(f, str):
+        return f
+    vals = []
+    for attr in ("path", "name", "local_path", "filename"):
+        v = getattr(f, attr, None)
+        if v:
+            vals.append(str(v))
+    return " ".join(vals) or str(f)
+
+
+def _rel_name(f) -> str:
+    """Путь файла внутри папки Drive (без выхода за пределы каталога)."""
+    if isinstance(f, str):
+        raw = f
+    else:
+        raw = getattr(f, "path", None) or getattr(f, "name", None) or getattr(f, "local_path", "") or ""
+    parts = [x for x in str(raw).replace("\\", "/").split("/") if x not in ("", ".", "..")]
+    if parts:
+        return "/".join(parts[-2:])
+    return f"drive_{getattr(f, 'id', 'file')}.txt"
+
+
+def _is_drive_txt(f) -> bool:
+    """True, если объект Drive выглядит как .txt.
+
+    Проверяем не только `.name`, но и `.path`: именно там gdown хранит
+    `merged_data_7.txt` для объектов `GoogleDriveFileToDownload`.
+    """
+    return _rel_name(f).lower().endswith(".txt")
+
+
 def _filter_drive_txts(files, include_regex: str = "", max_files: int = 0):
     """Фильтр .txt из Drive по имени/пути.
 
     Нужен для корпуса владельца: 7 частей по ~0.5-1+ ГБ, удобнее запускать
-    по одной части, например DRIVE_INCLUDE_REGEX=part_07 и DRIVE_MAX_FILES=1.
+    по одной части, например DRIVE_INCLUDE_REGEX=^merged_data_7\.txt$ и
+    DRIVE_MAX_FILES=1.
     """
-    txts = [f for f in (files or []) if str(getattr(f, "name", "")).lower().endswith(".txt")]
+    txts = [f for f in (files or []) if _is_drive_txt(f)]
     txts.sort(key=lambda f: _natural_key(_rel_name(f)))
     if include_regex:
         rx = re.compile(include_regex, re.IGNORECASE)
-        txts = [
-            f for f in txts
-            if rx.search(str(getattr(f, "name", ""))) or rx.search(_rel_name(f))
-        ]
+        txts = [f for f in txts if rx.search(_drive_text(f)) or rx.search(_rel_name(f))]
     if max_files and max_files > 0:
         txts = txts[:max_files]
     return txts
-
-def _rel_name(f) -> str:
-    """Путь файла внутри папки Drive (без выхода за пределы каталога)."""
-    raw = getattr(f, "path", None) or getattr(f, "name", "") or ""
-    parts = [x for x in str(raw).replace("\\", "/").split("/") if x not in ("", ".", "..")]
-    return "/".join(parts[-2:]) or f"drive_{getattr(f, 'id', 'file')}.txt"
-
 
 def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int,
                 include_regex: str = "", max_files: int = 0) -> int:
@@ -153,10 +182,13 @@ def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int,
         report(f"[data] не смог получить список файлов Drive ({type(exc).__name__}) — пропускаю")
         return 0
 
-    all_txts = [f for f in (files or []) if str(getattr(f, "name", "")).lower().endswith(".txt")]
+    all_txts = [f for f in (files or []) if _is_drive_txt(f)]
     others = [f for f in (files or []) if f not in all_txts]
     txts = _filter_drive_txts(files, include_regex, max_files)
     report(f"[data] в папке Drive: {len(files or [])} объектов, из них .txt — {len(all_txts)}")
+    if files:
+        sample = ", ".join(_rel_name(f) for f in list(files)[:5])
+        report(f"[data] примеры объектов Drive: {sample}")
     if include_regex:
         report(f"[data] фильтр Drive: /{include_regex}/ -> {len(txts)} .txt")
     if max_files:
@@ -179,7 +211,7 @@ def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int,
             report(f"[data] вышло время на Drive ({budget_s} с) — дальше без него")
             break
 
-        name = getattr(f, "name", "?")
+        name = _rel_name(f)
         size = _drive_file_size(f)
         remaining = limit - got if limit else 0
         if limit and size is not None and size > remaining:
@@ -195,13 +227,29 @@ def fetch_drive(url: str, out_dir: str, limit_mb: int, budget_s: int,
 
         dst = os.path.join(out_dir, _rel_name(f))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
+        fid = getattr(f, "id", None)
+        if not fid:
+            report(f"[data] не могу скачать {name}: gdown не вернул file id")
+            continue
         try:
-            gdown.download(id=getattr(f, "id"), output=dst, quiet=True)
+            gdown.download(id=fid, output=dst, quiet=True)
         except Exception as exc:
             report(f"[data] не скачался {name}: {type(exc).__name__}")
             continue
         if os.path.exists(dst):
-            got += os.path.getsize(dst)
+            file_size = os.path.getsize(dst)
+            if limit and got + file_size > limit:
+                skipped_big += 1
+                report(
+                    f"[data] удаляю {name}: {file_size / 1e6:.1f} МБ больше "
+                    f"остатка лимита {(limit - got) / 1e6:.1f} МБ"
+                )
+                try:
+                    os.remove(dst)
+                except OSError:
+                    pass
+                continue
+            got += file_size
             taken += 1
 
     report(f"[data] с Drive скачано: {taken} файлов, {got / 1e6:.1f} МБ")
@@ -259,6 +307,10 @@ def main() -> int:
             name = hf_ds or "Imperius/ru-classic"
             report(f"[data] стримлю датасет {name}, потолок {limit_mb} МБ")
             fetch_hf(name, limit_mb)
+
+    if not has_txt(RAW) and (os.environ.get("REQUIRE_REAL_DATA") or "").strip().lower() in ("1", "true", "yes"):
+        report("[data] REQUIRE_REAL_DATA=1: Drive/HF не дали .txt — демо-корпус не подставляю")
+        return 1
 
     if not has_txt(RAW):
         # Масштаб важен: при scale=1 демо-корпус даёт ~230 токенов на порцию,

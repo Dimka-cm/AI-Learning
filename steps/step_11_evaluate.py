@@ -40,17 +40,25 @@ def build_svg(steps_by_log) -> str:
     ymin, ymax = min(ys) * 0.9, max(ys) * 1.05
     if ymax <= ymin:
         ymax = ymin + 1
+    xspan = max(1, xmax - xmin)
+    yspan = max(1e-9, ymax - ymin)
 
-    def mx(x): return P + (x - xmin) / (xmax - xmin) * (W - 2 * P)
-    def my(y): return H - P - (y - ymin) / (ymax - ymin) * (H - 2 * P)
+    def mx(x): return P + (x - xmin) / xspan * (W - 2 * P)
+    def my(y): return H - P - (y - ymin) / yspan * (H - 2 * P)
 
-    path = "M" + " L".join(f"{mx(x):.1f},{my(y):.1f}" for x, y in pts)
+    coords = [(mx(x), my(y)) for x, y in pts]
+    path = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in coords)
+    dots = "\n".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="#58a6ff"/>'
+        for x, y in coords
+    )
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}">
 <rect x="0" y="0" width="{W}" height="{H}" fill="#0d1117"/>
 <text x="{P}" y="28" fill="#e6edf3" font-size="14" font-family="monospace">loss по шагам</text>
 <line x1="{P}" y1="{H-P}" x2="{W-P}" y2="{H-P}" stroke="#30363d"/>
 <line x1="{P}" y1="{P}" x2="{P}" y2="{H-P}" stroke="#30363d"/>
-<polyline points="{path}" fill="none" stroke="#58a6ff" stroke-width="2"/>
+<path d="{path}" fill="none" stroke="#58a6ff" stroke-width="2"/>
+{dots}
 <text x="{W-P}" y="{H-14}" fill="#8b949e" font-size="11" font-family="monospace" text-anchor="end">
 итераций: {len(pts)} · loss {max(ys):.3f} → {min(ys):.3f}</text>
 </svg>"""

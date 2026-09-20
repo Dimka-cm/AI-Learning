@@ -203,3 +203,35 @@ def test_default_resume_does_not_jump_to_future_step(monkeypatch, tmp_path):
     monkeypatch.delenv("RESUME_FROM_LATEST", raising=False)
 
     assert find_resume_checkpoint(cfg, 2) == str(prev)
+
+
+def test_drive_filter_uses_gdown_path_when_name_is_absent():
+    from collections import namedtuple
+    from steps.step_00_ci_data import _filter_drive_txts, _rel_name
+
+    GFile = namedtuple("GoogleDriveFileToDownload", "id path local_path")
+    files = [
+        GFile("3", "merged_data_10.txt", "/tmp/library/merged_data_10.txt"),
+        GFile("1", "merged_data_1.txt", "/tmp/library/merged_data_1.txt"),
+        GFile("2", "merged_data_7.txt", "/tmp/library/merged_data_7.txt"),
+    ]
+
+    selected = _filter_drive_txts(files, include_regex=r"^merged_data_7\.txt$", max_files=1)
+
+    assert [_rel_name(f) for f in _filter_drive_txts(files)] == [
+        "merged_data_1.txt",
+        "merged_data_7.txt",
+        "merged_data_10.txt",
+    ]
+    assert len(selected) == 1
+    assert selected[0].id == "2"
+
+
+def test_progress_svg_handles_single_loss_point():
+    from steps.step_11_evaluate import build_svg
+
+    svg = build_svg([[{"event": "train", "loss": 12.5}]])
+
+    assert "<svg" in svg
+    assert "<circle" in svg
+    assert "итераций: 1" in svg
