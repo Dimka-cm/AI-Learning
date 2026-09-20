@@ -1,0 +1,207 @@
+{
+ "Black": [
+  0,
+  0,
+  0
+ ],
+ "Title": [
+  21,
+  21,
+  21
+ ],
+ "Background": [
+  21,
+  21,
+  21
+ ],
+ "WindowBorder": [
+  15,
+  15,
+  15
+ ],
+ "Foldout": [
+  15,
+  15,
+  15
+ ],
+ "Input": [
+  15,
+  15,
+  15
+ ],
+ "InputOutline": [
+  56,
+  56,
+  56
+ ],
+ "Recessed": [
+  26,
+  26,
+  26
+ ],
+ "Panel": [
+  36,
+  36,
+  36
+ ],
+ "Header": [
+  47,
+  47,
+  47
+ ],
+ "Dropdown": [
+  56,
+  56,
+  56
+ ],
+ "DropdownOutline": [
+  76,
+  76,
+  76
+ ],
+ "Hover": [
+  87,
+  87,
+  87
+ ],
+ "Hover2": [
+  128,
+  128,
+  128
+ ],
+ "White": [
+  255,
+  255,
+  255
+ ],
+ "White25": [
+  255,
+  255,
+  255
+ ],
+ "Highlight": [
+  0,
+  112,
+  224
+ ],
+ "Primary": [
+  0,
+  112,
+  224
+ ],
+ "PrimaryHover": [
+  14,
+  134,
+  255
+ ],
+ "PrimaryPress": [
+  0,
+  80,
+  160
+ ],
+ "Secondary": [
+  56,
+  56,
+  56
+ ],
+ "Foreground": [
+  192,
+  192,
+  192
+ ],
+ "ForegroundHover": [
+  255,
+  255,
+  255
+ ],
+ "ForegroundHeader": [
+  200,
+  200,
+  200
+ ],
+ "SelectParent": [
+  44,
+  50,
+  58
+ ],
+ "Notifications": [
+  70,
+  75,
+  80
+ ],
+ "AccentBlue": [
+  38,
+  187,
+  255
+ ],
+ "AccentPurple": [
+  161,
+  57,
+  191
+ ],
+ "AccentPink": [
+  255,
+  114,
+  156
+ ],
+ "AccentRed": [
+  255,
+  64,
+  64
+ ],
+ "AccentOrange": [
+  254,
+  155,
+  7
+ ],
+ "AccentYellow": [
+  255,
+  220,
+  26
+ ],
+ "AccentGreen": [
+  139,
+  194,
+  74
+ ],
+ "AccentBrown": [
+  128,
+  77,
+  57
+ ],
+ "AccentBlack": [
+  36,
+  36,
+  36
+ ],
+ "AccentGray": [
+  128,
+  128,
+  128
+ ],
+ "AccentWhite": [
+  255,
+  255,
+  255
+ ],
+ "AccentFolder": [
+  182,
+  143,
+  85
+ ],
+ "Warning": [
+  255,
+  184,
+  0
+ ],
+ "Error": [
+  239,
+  53,
+  53
+ ],
+ "Success": [
+  31,
+  228,
+  75
+ ]
+}

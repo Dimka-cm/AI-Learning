@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+assets/ue5/
+refs/
+*.pt
+!ui_vision.pt
+preview.png
