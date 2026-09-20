@@ -28,3 +28,9 @@ progress.svg
 # Память агента (история/знания) — локальное состояние, не в git
 agent/memory/
 AgentWorkspace/
+
+# --- Проект «Глаза для UE5» (из main) ---
+assets/ue5/
+refs/
+!ui_vision.pt
+preview.png

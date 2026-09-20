@@ -1,0 +1,98 @@
+name: Обучение глаз на интерфейсе UE5
+
+on:
+  workflow_dispatch:
+    inputs:
+      samples:
+        description: "Сколько кадров собрать"
+        required: false
+        default: "12000"
+      epochs:
+        description: "Сколько эпох учить"
+        required: false
+        default: "25"
+      test_samples:
+        description: "Проверочная выборка"
+        required: false
+        default: "1500"
+      width:
+        description: "Ширина кадра"
+        required: false
+        default: "640"
+      height:
+        description: "Высота кадра"
+        required: false
+        default: "360"
+      cores:
+        description: "Потоков обучению"
+        required: false
+        default: "4"
+      eval_every:
+        description: "Проверять каждые N эпох"
+        required: false
+        default: "5"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350        # потолок GitHub — 360 минут, запас на артефакты
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Поставить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pillow pytest cairosvg
+
+      - name: Скачать ассеты интерфейса UE5
+        # Ассеты Epic не хранятся в репозитории. Без этого шага рендер
+        # рисовал бы выдуманные значки, и агент выучил бы не тот редактор.
+        run: python tools/fetch_ue5_assets.py --token "${{ github.token }}"
+
+      - name: Показать, на чём считаем
+        run: |
+          nproc && free -g | head -2
+          python -c "from ue5 import icons; print('иконок Epic:', len(icons.catalog(16)))"
+          python -c "from ue5.theme import COLORS; print('цветов темы:', len(COLORS))"
+
+      - name: Тесты
+        run: python -m pytest tests/ -q
+
+      - name: Обучение
+        run: |
+          python pretrain_ui.py \
+            --samples ${{ inputs.samples }} \
+            --epochs ${{ inputs.epochs }} \
+            --test-samples ${{ inputs.test_samples }} \
+            --width ${{ inputs.width }} \
+            --height ${{ inputs.height }} \
+            --cores ${{ inputs.cores }} \
+            --eval-every ${{ inputs.eval_every }} \
+            --ram-limit 15500 \
+            --out ui_vision.pt 2>&1 | tee train.log
+
+      - name: Сводка
+        if: always()
+        run: |
+          {
+            echo "## Глаза для интерфейса UE5"
+            echo '```'
+            sed -n '/ЧТО ГЛАЗА НАУЧИЛИСЬ/,$p' train.log | head -30
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-vision-weights
+          path: |
+            ui_vision.pt
+            ui_vision.json
+            train.log
+          retention-days: 30

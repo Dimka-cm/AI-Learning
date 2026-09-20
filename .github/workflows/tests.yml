@@ -1,0 +1,25 @@
+name: Тесты
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Зависимости
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pytest pillow cairosvg
+      - name: Ассеты UE5
+        run: python tools/fetch_ue5_assets.py --token "${{ github.token }}"
+      - name: Тесты
+        run: python -m pytest tests/ -q
