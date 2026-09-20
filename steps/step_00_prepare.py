@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -54,12 +55,13 @@ def main() -> int:
     targets = {s: 0 for s in range(1, cfg.shards + 1)}  # счётчик токенов на порцию
     files: list[tuple[str, int, int]] = []               # (path, lo, hi) диапазон домена
 
-    # 1) доменные папки
+    # 1) доменные папки (рекурсивно: gdown --folder кладёт файлы в подпапку)
     for domain, (lo, hi) in DOMAIN_SHARDS.items():
         d = os.path.join(raw_dir, domain)
         if not os.path.isdir(d):
             continue
-        txts = sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".txt"))
+        txts = sorted(str(p) for p in Path(d).rglob("*.txt"))
+        txts = sorted(set(txts))  # без дублей
         if not txts:
             continue
         for path in txts:

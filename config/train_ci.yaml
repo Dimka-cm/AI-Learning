@@ -1,0 +1,38 @@
+# CI-конфиг: компактное ДООБУЧЕНИЕ на GitHub-раннере (2 vCPU / 7 GB RAM, CPU).
+# ВАЖНО: никакого «обучения с нуля» — берём готовую модель ruGPT-3 Small
+# и дообучаем пару шагов на маленьком срезе, чтобы уложиться в лимиты
+# (время джобы и 7 GB RAM). Результат — рабочий чекпоинт + график loss.
+
+model:
+  name: "ai-forever/rugpt3small_based_on_gpt2"
+
+data:
+  text_dir: "data/raw"          # скачанные/сгенерированные .txt
+  tokenized_dir: "data/shards"  # порции shard_01..10 (для CI готовим 1..2)
+  shards: 10                    # всего порций
+  block_size: 256               # короткий контекст = меньше памяти/времени
+  dtype: "uint16"
+
+training:
+  device: "auto"                # в Actions -> CPU (нет GPU); fp16 выключен
+  epochs_per_step: 1
+  batch_size: 8
+  grad_accum: 4                 # эффективный батч 32
+  lr: 3e-4
+  weight_decay: 0.01
+  warmup_steps: 20
+  max_steps: 0
+  checkpoint_every_steps: 40
+  log_every_steps: 5
+  fp16: false
+  gradient_checkpointing: true  # экономия RAM (7 GB всего)
+  num_workers: 2
+  seed: 42
+
+paths:
+  checkpoints: "checkpoints"
+  logs: "logs"
+
+# переопределяется переменными окружения в workflow (MAX_STEPS, EPOCHS...)
+extra:
+  local_files_only: false

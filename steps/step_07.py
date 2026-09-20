@@ -16,9 +16,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 import torch
 
-from src.config import get_cfg
+from src.config import get_cfg, get_cfg_ci
 from src.trainer import Trainer
 from src.data_utils import find_resume_checkpoint, load_shard, param_count
+
+
+def _cfg():
+    import os
+    return get_cfg_ci() if os.environ.get("CI") == "1" else get_cfg()
 
 STEP = int(os.path.basename(__file__).split("_")[1].split(".")[0])  # 1..10
 
@@ -52,7 +57,7 @@ def make_batch_fn(cfg, data, device):
 
 def main() -> int:
     args = parse_args()
-    cfg = get_cfg()
+    cfg = _cfg()
     if args.epochs:
         cfg.epochs_per_step = args.epochs
 

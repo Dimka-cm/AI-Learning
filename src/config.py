@@ -81,6 +81,8 @@ class CFG:
             "BATCH_SIZE": "batch_size",
             "BLOCK_SIZE": "block_size",
             "MODEL_NAME": "model_name",
+            "FP16": "fp16",
+            "LOG_EVERY_STEPS": "log_every_steps",
         }
         for env, attr in overrides.items():
             v = os.environ.get(env)
@@ -88,6 +90,8 @@ class CFG:
                 try:
                     if attr in ("model_name",):
                         setattr(self, attr, v)
+                    elif attr == "fp16":
+                        setattr(self, attr, v.strip().lower() in ("1", "true", "yes"))
                     else:
                         setattr(self, attr, int(v))
                 except ValueError:
@@ -100,6 +104,11 @@ class CFG:
 
 def get_cfg() -> CFG:
     return CFG.load(os.path.join(ROOT, "config", "train.yaml")).apply_env_overrides()
+
+
+def get_cfg_ci() -> CFG:
+    """Конфиг для GitHub Actions (CPU-раннер): компактный прогон дообучения."""
+    return CFG.load(os.path.join(ROOT, "config", "train_ci.yaml")).apply_env_overrides()
 
 
 def choose_device(preference: str = "auto") -> str:
