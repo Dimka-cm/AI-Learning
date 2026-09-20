@@ -1,0 +1,35 @@
+# Конфигурация агента. Агент = скрещение обученных моделей (экспертов)
+# с переключателем (роутером) + инструменты твоего ПК + память + зрение.
+
+name: "ПК-агент"
+memory_dir: "agent/memory"
+trace: false               # true = печатать, куда роутер направил запрос
+
+# Песочница для инструментов — «мой воркспейс, но твой компьютер».
+tools:
+  workspace: "~/AgentWorkspace"      # корень, где агент читает/пишет
+  allow_extra_roots: []              # список путей, куда агент может ходить дополнительно
+  dry_run: false                     # true = агент только ПРОГОВАРИВАЕТ действия
+  allow_dangerous: false            # true = разрешить delete/run без доп. подтверждения
+
+# Эксперты (обученные ИИ). Подключи сюда свои модели, когда дообучишь.
+experts:
+  chat:
+    kind: "hf"                       # языковая модель (дообученный ruGPT-3)
+    model: "ai-forever/rugpt3small_based_on_gpt2"
+    generate:
+      max_new_tokens: 128
+      do_sample: true
+      temperature: 0.8
+      top_p: 0.9
+  code:
+    kind: "stub"                     # появится после дообучения на C/C++/C#
+  math:
+    kind: "math"
+
+# Глаз (2D-зрение); 3D — как появится, kind: depth.
+vision:
+  kind: "torch"
+  arch: "mobilenet_v3_small"
+  state_dict_path: "models/eye_2d.pt"     # положи сюда веса своего «глаза»
+  classes: ["not_game", "unreal_engine", "unity", "other_3d_engine"]

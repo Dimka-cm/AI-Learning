@@ -24,3 +24,7 @@ models/*
 *.pth
 *.jsonl
 progress.svg
+
+# Память агента (история/знания) — локальное состояние, не в git
+agent/memory/
+AgentWorkspace/
