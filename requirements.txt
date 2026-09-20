@@ -7,3 +7,7 @@ tokenizers>=0.15
 numpy>=1.24
 tqdm>=4.66
 pyyaml>=6.0
+
+# Опционально: для скачивания корпуса через Croissant (иначе хватит datasets):
+# mlcroissant
+
