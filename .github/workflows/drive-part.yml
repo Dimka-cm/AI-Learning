@@ -106,7 +106,7 @@ jobs:
           exit 0
 
       - name: Восстановить чекпоинт из прошлого запуска
-        if: ${{ steps.drivecfg.outputs.resume_run_id != '' }}
+        if: ${{ steps.drivecfg.outputs.enabled == 'true' && steps.drivecfg.outputs.resume_run_id != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ci-checkpoint-progress
@@ -115,6 +115,7 @@ jobs:
           path: .
 
       - name: Кэш модели HF
+        if: ${{ steps.drivecfg.outputs.enabled == 'true' }}
         uses: actions/cache@v4
         with:
           path: |
@@ -125,10 +126,12 @@ jobs:
             hf-${{ runner.os }}-rugpt3-
 
       - name: Данные Drive + токенизация
+        if: ${{ steps.drivecfg.outputs.enabled == 'true' }}
         timeout-minutes: 180
         run: python steps/step_00_ci_data.py
 
       - name: Дообучение выбранной части
+        if: ${{ steps.drivecfg.outputs.enabled == 'true' }}
         run: |
           NPROC=$(nproc)
           echo "Раннер: $NPROC ядер CPU, $(free -m | awk '/Mem:/{print $2}') МБ RAM"
