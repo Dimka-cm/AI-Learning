@@ -17,6 +17,8 @@ def test_training_profile_captures_owner_choices():
     assert profile["first_github_actions_run"]["data_source"] == "hf"
     assert profile["first_github_actions_run"]["max_steps"] == 300
     assert profile["future_ui"]["exact_clone_of_claude"] is False
+    assert "художественно" in " ".join(profile["sources"]["allowed"]).lower()
+    assert "не кодовый" in profile["sources"]["qa_pairs"].lower()
 
     priorities = profile["code_priorities"]
     for key in ("cpp", "unreal_engine_5", "java", "mixins", "gradle", "python", "blueprint"):

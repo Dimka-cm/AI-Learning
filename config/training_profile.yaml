@@ -74,11 +74,11 @@ code_tasks:
 sources:
   allowed:
     - "HuggingFace Imperius/ru-classic"
-    - "русский Q/A-корпус владельца с Google Drive"
+    - "русский художественно-разговорный корпус владельца с Google Drive"
     - "кодовые репозитории/архивы"
   drive_allowed: true
   fresh_data_policy: "свежие данные после 2019 нужны в первую очередь по программированию"
-  qa_pairs: "много: основной Drive-корпус владельца — русский разговорный вопрос-ответ"
+  qa_pairs: "основной Drive-корпус владельца — русский художественный/разговорный текст; не кодовый корпус"
 
 internet:
   enabled_later: true
