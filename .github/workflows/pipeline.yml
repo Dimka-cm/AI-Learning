@@ -49,6 +49,11 @@ on:
         required: false
         default: "3600"
         type: string
+      resume_run_id:
+        description: "ID прошлого run, откуда скачать ci-checkpoint-progress для продолжения"
+        required: false
+        default: ""
+        type: string
       start_step:
         description: "Первый шаг обучения"
         required: true
@@ -133,6 +138,15 @@ jobs:
           restore-keys: |
             hf-${{ runner.os }}-rugpt3-
 
+      - name: Восстановить чекпоинт из прошлого запуска
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-checkpoint-progress
+          run-id: ${{ github.event.inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: .
+
       - name: Данные (Drive / датасет / демо) + токенизация
         # Потолок по времени: ручной Drive-прогон одной части может быть большим.
         timeout-minutes: 120
@@ -154,6 +168,7 @@ jobs:
           MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'pull_request' && '60' || '0') }}
           EPOCHS_PER_STEP: "1"
           LOG_EVERY_STEPS: "5"
+          RESUME_FROM_LATEST: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' && '1' || '' }}
           # ВАЖНО: NUM_WORKERS может быть "auto" (наша договорённость),
           # а OMP_NUM_THREADS — НЕТ: libgomp понимает только число и падал
           # с «Недопустимое значение переменной окружения OMP_NUM_THREADS».

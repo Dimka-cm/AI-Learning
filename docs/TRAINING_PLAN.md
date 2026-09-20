@@ -92,22 +92,32 @@ end_step: 2
 max_steps: 300
 ```
 
-Рекомендуемые inputs для прогона **одной части** Drive-корпуса:
+Рекомендуемые inputs для прогона **одной части** Drive-корпуса. В папке `library` файлы называются `merged_data_1.txt` ... `merged_data_7.txt`:
 
 ```text
 data_source: drive
-drive_folder_url: <ссылка на папку Drive>
-drive_file_regex: part_01        # или уникальный кусок имени нужного .txt
+drive_folder_url: <ссылка на папку library>
+drive_file_regex: ^merged_data_1\.txt$     # номер меняется 1..7
 drive_max_files: 1
-data_limit_mb: 1200             # больше размера выбранной части; для последней можно 500
+data_limit_mb: 1200                       # больше размера выбранной части; для 7-й можно 500-600
 drive_budget_s: 3600
 start_step: 1
-end_step: 2
+end_step: 4                               # text-домен раскладывается в shard_01..04
 max_steps: 300
+resume_run_id:                            # пусто для первой части
 ```
 
-Если имена частей другие, `drive_file_regex` должен совпадать с именем нужного `.txt`.
-Например: `07`, `часть_7`, `book-final`, `part_7`.
+Чтобы обучение **накапливалось** между частями на GitHub Actions, у второй и следующих частей нужно указать `resume_run_id` предыдущего успешного run. Workflow скачает артефакт `ci-checkpoint-progress`, восстановит `checkpoints/**` и включит `RESUME_FROM_LATEST=1`, чтобы шаг 01 продолжил с последнего чекпоинта прошлой части.
+
+Пример цепочки:
+
+```text
+часть 1: drive_file_regex=^merged_data_1\.txt$, resume_run_id пустой
+часть 2: drive_file_regex=^merged_data_2\.txt$, resume_run_id=<run id части 1>
+часть 3: drive_file_regex=^merged_data_3\.txt$, resume_run_id=<run id части 2>
+...
+часть 7: drive_file_regex=^merged_data_7\.txt$, data_limit_mb=600, resume_run_id=<run id части 6>
+```
 
 Успех первого прогона:
 

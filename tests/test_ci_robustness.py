@@ -157,3 +157,49 @@ def test_drive_filter_selects_one_part_naturally():
     assert [f.name for f in _filter_drive_txts(files)] == ["part_1.txt", "part_2.txt", "part_10.txt"]
     assert [f.name for f in _filter_drive_txts(files, include_regex="part_2", max_files=1)] == ["part_2.txt"]
     assert _filter_drive_txts(files, include_regex="missing") == []
+
+
+def test_resume_from_latest_uses_newest_checkpoint(monkeypatch, tmp_path):
+    from src.data_utils import find_resume_checkpoint
+
+    cfg = Cfg(str(tmp_path), block_size=8)
+    cfg.checkpoints_dir = "checkpoints"
+    cfg.shards = 10
+
+    p4 = tmp_path / "checkpoints" / "step_04"
+    p1 = tmp_path / "checkpoints" / "step_01"
+    p4.mkdir(parents=True)
+    p1.mkdir(parents=True)
+    old = p4 / "last.pt"
+    new = p1 / "last.pt"
+    old.write_bytes(b"old")
+    new.write_bytes(b"new")
+    os.utime(old, (1000, 1000))
+    os.utime(new, (2000, 2000))
+
+    monkeypatch.setenv("RESUME_FROM_LATEST", "1")
+
+    assert find_resume_checkpoint(cfg, 2) == str(new)
+
+
+def test_default_resume_does_not_jump_to_future_step(monkeypatch, tmp_path):
+    from src.data_utils import find_resume_checkpoint
+
+    cfg = Cfg(str(tmp_path), block_size=8)
+    cfg.checkpoints_dir = "checkpoints"
+    cfg.shards = 10
+
+    p4 = tmp_path / "checkpoints" / "step_04"
+    p1 = tmp_path / "checkpoints" / "step_01"
+    p4.mkdir(parents=True)
+    p1.mkdir(parents=True)
+    future = p4 / "last.pt"
+    prev = p1 / "last.pt"
+    future.write_bytes(b"future")
+    prev.write_bytes(b"prev")
+    os.utime(future, (3000, 3000))
+    os.utime(prev, (1000, 1000))
+
+    monkeypatch.delenv("RESUME_FROM_LATEST", raising=False)
+
+    assert find_resume_checkpoint(cfg, 2) == str(prev)

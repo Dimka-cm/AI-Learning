@@ -76,6 +76,11 @@ on:
         required: false
         default: "3600"
         type: string
+      resume_run_id:
+        description: "ID прошлого run, откуда скачать артефакт с checkpoints для продолжения"
+        required: false
+        default: ""
+        type: string
   push:
     branches: [main]
     paths:
@@ -126,6 +131,15 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Восстановить чекпоинт из прошлого запуска
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: training-progress
+          run-id: ${{ github.event.inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: .
+
       - name: Данные (свои .txt / Drive / HF / демо) + токенизация
         # Раньше здесь был `--prepare`: на свежем чекауте данных нет, и шаги
         # падали с FileNotFoundError. Теперь данные гарантированно находятся.
@@ -135,6 +149,8 @@ jobs:
           CUDA_VISIBLE_DEVICES: ""
 
       - name: Train steps ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || (github.event_name == 'push' && 2 || 10) }}
+        env:
+          RESUME_FROM_LATEST: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' && '1' || '' }}
         run: >
           python orchestrator.py
           --start ${{ github.event.inputs.start_step || 1 }}
