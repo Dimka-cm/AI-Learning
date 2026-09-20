@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,101 @@ DOMAIN_SHARDS = {
     "code": (7, 8),
     "behavior": (9, 10),
 }
+
+
+# Распознаём Q/A-диалоги, чтобы не разрывать пару «вопрос -> ответ» между
+# разными shard. Это важно для корпуса владельца: там много вручную написанных
+# русских вопрос-ответов. Если вопрос и ответ попадут в разные порции, модель
+# хуже выучит именно формат диалога.
+QUESTION_PREFIX_RE = re.compile(
+    r"^\s*(пользователь|user|human|человек|вопрос|q)\s*[:：-]",
+    re.IGNORECASE,
+)
+ANSWER_PREFIX_RE = re.compile(
+    r"^\s*(агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+INLINE_ANSWER_RE = re.compile(
+    r"(агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+SPEAKER_PREFIX_RE = re.compile(
+    r"^\s*(пользователь|user|human|человек|вопрос|q|агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+
+
+def iter_training_units(fh):
+    """Поток учебных блоков из txt.
+
+    Обычная проза остаётся построчной. Диалоги вида:
+
+        Пользователь: вопрос
+        Агент: ответ
+        Пользователь: следующий вопрос
+        Агент: следующий ответ
+
+    группируются парами/блоками, чтобы round-robin раскладка по shards не
+    отправила вопрос в shard_01, а ответ — в shard_02. Пустая строка тоже
+    завершает текущий блок, поэтому формат с blank-line-separated Q/A работает.
+
+    Yield: (text, raw_line_count).
+    """
+    block: list[str] = []
+    raw_count = 0
+    has_answer = False
+
+    def flush():
+        nonlocal block, raw_count, has_answer
+        if not block:
+            return None
+        item = ("\n".join(block), raw_count)
+        block = []
+        raw_count = 0
+        has_answer = False
+        return item
+
+    for raw_line in fh:
+        line = raw_line.strip()
+        if not line:
+            item = flush()
+            if item is not None:
+                yield item
+            continue
+
+        is_question = bool(QUESTION_PREFIX_RE.match(line))
+        is_answer = bool(ANSWER_PREFIX_RE.match(line))
+        has_inline_answer = bool(INLINE_ANSWER_RE.search(line))
+        has_speaker = bool(SPEAKER_PREFIX_RE.match(line))
+
+        if has_speaker:
+            # Новый вопрос после уже увиденного ответа = новая Q/A-пара.
+            if is_question and block and has_answer:
+                item = flush()
+                if item is not None:
+                    yield item
+            block.append(line)
+            raw_count += 1
+            has_answer = has_answer or is_answer or has_inline_answer
+            continue
+
+        if block:
+            # Продолжение многострочного вопроса/ответа. Защита от слишком
+            # огромного блока: если в txt нет пустых строк, режем по 40 строкам.
+            block.append(line)
+            raw_count += 1
+            if raw_count >= 40:
+                item = flush()
+                if item is not None:
+                    yield item
+            continue
+
+        # Обычная строка прозы/кода без Q/A-маркеров.
+        yield line, 1
+
+    item = flush()
+    if item is not None:
+        yield item
 
 
 def main() -> int:
@@ -103,24 +199,25 @@ def main() -> int:
             continue
         span = hi - lo + 1
         file_lines = 0
+        file_units = 0
         with fh:
-            for i, line in enumerate(fh):
-                line = line.strip()
-                if not line:
-                    continue
-                # каждая строка идёт в свой шард диапазона домена (равномерно)
+            for i, (unit, raw_lines) in enumerate(iter_training_units(fh)):
+                # каждый учебный блок идёт в свой шард диапазона домена
+                # (равномерно), но Q/A-пара остаётся внутри одного блока.
                 s = lo + (i % span)
-                ids = tok(line)["input_ids"] + [eos]
+                ids = tok(unit)["input_ids"] + [eos]
                 buffer[s].extend(ids)
                 if len(buffer[s]) > 500_000:
                     flush(s)
-                file_lines += 1
-                lines_done += 1
+                file_units += 1
+                file_lines += raw_lines
+                lines_done += raw_lines
                 if lines_done % 200_000 == 0:
                     mins = (time.time() - started) / 60
                     print(f"[token] строк {lines_done:,} за {mins:.1f} мин "
                           f"({lines_done / max(mins, 1e-6) / 1000:.0f} тыс. строк/мин)", flush=True)
-        print(f"[token] {os.path.basename(path)}: {file_lines:,} строк", flush=True)
+        print(f"[token] {os.path.basename(path)}: {file_lines:,} строк, "
+              f"{file_units:,} учебных блоков", flush=True)
 
     for s in range(1, cfg.shards + 1):
         flush(s)
