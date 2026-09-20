@@ -130,6 +130,36 @@ def iter_training_units(fh):
         yield item
 
 
+
+
+def _encode_units(tok, units: list[str]) -> list[list[int]]:
+    """Батчевое кодирование текстовых блоков.
+
+    46+ млн строк нельзя токенизировать по одной: это миллионы Python-вызовов.
+    Fast tokenizer умеет принимать список строк, поэтому кодируем пачками.
+    Для простых моков/старых токенизаторов оставлен fallback на построчный вызов.
+    """
+    if not units:
+        return []
+    try:
+        encoded = tok(units, add_special_tokens=False)["input_ids"]
+    except TypeError:
+        encoded = [tok(unit)["input_ids"] for unit in units]
+    # Некоторые токенизаторы для одной строки возвращают list[int]. Здесь units
+    # всегда список, но оставим защиту, чтобы тестовые моки не ломались.
+    if encoded and isinstance(encoded[0], int):
+        return [encoded]
+    return encoded
+
+
+def append_token_batch(tok, items: list[tuple[int, str]], eos: int, buffer: dict[int, list[int]], flush) -> None:
+    """Токенизирует пачку (shard, text) и раскладывает ids по буферам shard."""
+    encoded = _encode_units(tok, [unit for _, unit in items])
+    for (shard, _unit), ids in zip(items, encoded):
+        buffer[shard].extend(list(ids) + [eos])
+        if len(buffer[shard]) > 500_000:
+            flush(shard)
+
 def main() -> int:
     cfg = get_cfg()
     raw_dir = cfg.p(cfg.text_dir)
@@ -177,6 +207,8 @@ def main() -> int:
 
     # читаем потоком, не держим весь корпус в памяти
     buffer: dict[int, list[int]] = {s: [] for s in range(1, cfg.shards + 1)}
+    tokenize_batch_size = max(1, int(os.environ.get("TOKENIZE_BATCH_SIZE", "1024")))
+    print(f"[token] batch_size={tokenize_batch_size} учебных блоков")
 
     def flush(s: int):
         if buffer[s]:
@@ -200,15 +232,16 @@ def main() -> int:
         span = hi - lo + 1
         file_lines = 0
         file_units = 0
+        pending: list[tuple[int, str]] = []
         with fh:
             for i, (unit, raw_lines) in enumerate(iter_training_units(fh)):
                 # каждый учебный блок идёт в свой шард диапазона домена
                 # (равномерно), но Q/A-пара остаётся внутри одного блока.
                 s = lo + (i % span)
-                ids = tok(unit)["input_ids"] + [eos]
-                buffer[s].extend(ids)
-                if len(buffer[s]) > 500_000:
-                    flush(s)
+                pending.append((s, unit))
+                if len(pending) >= tokenize_batch_size:
+                    append_token_batch(tok, pending, eos, buffer, flush)
+                    pending.clear()
                 file_units += 1
                 file_lines += raw_lines
                 lines_done += raw_lines
@@ -216,6 +249,8 @@ def main() -> int:
                     mins = (time.time() - started) / 60
                     print(f"[token] строк {lines_done:,} за {mins:.1f} мин "
                           f"({lines_done / max(mins, 1e-6) / 1000:.0f} тыс. строк/мин)", flush=True)
+        if pending:
+            append_token_batch(tok, pending, eos, buffer, flush)
         print(f"[token] {os.path.basename(path)}: {file_lines:,} строк, "
               f"{file_units:,} учебных блоков", flush=True)
 

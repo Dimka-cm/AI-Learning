@@ -51,3 +51,30 @@ def test_blank_line_finishes_dialogue_block():
     assert len(units) == 2
     assert "Как дела" in units[0] and "Нормально" in units[0]
     assert "Что делать" in units[1] and "Проверить логи" in units[1]
+
+
+def test_append_token_batch_uses_vectorized_tokenizer():
+    from steps.step_00_prepare import append_token_batch
+
+    class FakeBatchTokenizer:
+        def __init__(self):
+            self.calls = []
+
+        def __call__(self, units, add_special_tokens=False):
+            assert add_special_tokens is False
+            self.calls.append(list(units))
+            return {"input_ids": [[len(x)] for x in units]}
+
+    tok = FakeBatchTokenizer()
+    buffer = {1: [], 2: []}
+    flushed = []
+
+    def flush(shard):
+        flushed.append(shard)
+
+    append_token_batch(tok, [(1, "привет"), (2, "мир"), (1, "длинная строка")], 0, buffer, flush)
+
+    assert tok.calls == [["привет", "мир", "длинная строка"]]
+    assert buffer[1] == [6, 0, 14, 0]
+    assert buffer[2] == [3, 0]
+    assert flushed == []
