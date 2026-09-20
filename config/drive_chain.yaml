@@ -1,0 +1,17 @@
+# Автоцепочка для оставшихся частей Drive-корпуса.
+# Этот workflow стартует от push и сам ждёт завершения seed_resume_run_id.
+
+enabled: true
+
+# Run, который сейчас обучает merged_data_7.txt. После его успеха цепочка пойдёт по 1..6.
+seed_resume_run_id: "35542629976"
+
+drive_folder_url: "https://drive.google.com/drive/folders/1u_rcfQ6P50bK4H23tmrh20U_2BRDVEm5?usp=drive_link"
+parts: [1, 2, 3, 4, 5, 6]
+
+data_limit_mb: 2000
+drive_budget_s: 3600
+start_step: 1
+end_step: 4
+max_steps: 300
+eval_limit: 4
