@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.DS_Store
+
+# Большие артефакты — не кладём в git
+data/raw/*
+data/shards/*
+checkpoints/*
+logs/*
+models/*
+
+# Но оставляем сами папки
+!data/raw/.gitkeep
+!data/shards/.gitkeep
+!checkpoints/.gitkeep
+!logs/.gitkeep
+!models/.gitkeep
+
+*.bin
+*.pt
+*.pth
+*.jsonl
+progress.svg

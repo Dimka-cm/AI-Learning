@@ -1,0 +1,36 @@
+# Единый конфиг пайплайна обучения.
+# Шаг i (steps/step_II.py) ест порцию data/shards/shard_II.bin,
+# резюмируется с checkpoints/step_{i-1}/last.pt и пишет в checkpoints/step_{i}/.
+
+model:
+  # ruGPT-3 Small: 125M параметров, чистый русский, лёгкая для RTX 3060 6GB.
+  # Альтернативы: "Qwen/Qwen2.5-0.5B" (многоязычная, знает код/математику) —
+  # тогда в данных включи dtype: uint32 (вокабуляр больше 65535).
+  name: "ai-forever/rugpt3small_based_on_gpt2"
+
+data:
+  text_dir: "data/raw"            # сырые .txt (русский корпус + C/C++/C# + математика)
+  tokenized_dir: "data/shards"    # токенизированные порции shard_01.bin ... shard_10.bin
+  shards: 10                      # число порций = число шагов
+  block_size: 1024                # длина контекста в токенах (vocab GPT-2 = 50257 < 65535)
+  dtype: "uint16"
+
+training:
+  device: "auto"                  # auto -> CUDA (GPU 1 через CUDA_VISIBLE_DEVICES=1) -> CPU
+  epochs_per_step: 3              # эпох за один шаг; 10 шагов => до 30 эпох суммарно
+  batch_size: 4                   # для 6GB VRAM: 4-8
+  grad_accum: 8                   # эффективный батч = batch_size * grad_accum
+  lr: 3e-4
+  weight_decay: 0.01
+  warmup_steps: 200
+  max_steps: 0                    # 0 = пройти весь shard (иначе обрезка для быстрых тестов)
+  checkpoint_every_steps: 500
+  log_every_steps: 20
+  fp16: true                      # смешанная точность — экономит память и ускоряет
+  gradient_checkpointing: true    # ещё экономия VRAM
+  num_workers: 5                  # сколько CPU отдать загрузке данных (у тебя их 5 свободных)
+  seed: 42
+
+paths:
+  checkpoints: "checkpoints"
+  logs: "logs"

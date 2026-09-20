@@ -1,0 +1,127 @@
+name: Train + Progress
+
+# Управляющий workflow: дирижирует обучением и выводит прогресс.
+#
+# Два режима:
+#  1) self-hosted runner на ноуте (RTX 3060, GPU 1) — реальное обучение.
+#  2) ubuntu-latest (CPU) — только смоук-тест на крошечном max_steps.
+#
+# Прогресс: логи шагов -> artifact -> summary-отчёт + SVG график loss.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Раннер (label)"
+        required: true
+        default: "self-hosted"
+        type: string
+      start_step:
+        description: "Первый шаг"
+        required: true
+        default: 1
+        type: number
+      end_step:
+        description: "Последний шаг"
+        required: true
+        default: 10
+        type: number
+      epochs:
+        description: "Эпох на шаг"
+        required: true
+        default: 3
+        type: number
+      gpu_index:
+        description: "Какую NVIDIA брать: auto | CUDA-индекс | имя (напр. 3060)"
+        required: false
+        default: "auto"
+        type: string
+      max_steps:
+        description: "Обрезка шага (0 = полный прогон; для CPU-теста ставь 10)"
+        required: false
+        default: "0"
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - "config/**"
+      - "src/**"
+      - "steps/**"
+      - "orchestrator.py"
+      - ".github/workflows/train.yml"
+
+concurrency:
+  group: train-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HF_HOME: ${{ github.workspace }}/hf-cache
+  TORCH_HOME: ${{ github.workspace }}/torch-cache
+  MAX_STEPS: ${{ github.event.inputs.max_steps || '0' }}
+
+jobs:
+  train:
+    runs-on: ${{ github.event.inputs.runner || 'self-hosted' }}
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Prepare data (if any .txt present)
+        run: python orchestrator.py --prepare --device cpu --gpu ""
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+
+      - name: Train steps ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || 10 }}
+        run: >
+          python orchestrator.py
+          --start ${{ github.event.inputs.start_step || 1 }}
+          --end ${{ github.event.inputs.end_step || 10 }}
+          --epochs ${{ github.event.inputs.epochs || 3 }}
+          --device auto
+          --gpu ${{ github.event.inputs.gpu_index || 'auto' }}
+          --evaluate
+
+      - name: Upload progress (logs + graph)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-progress
+          path: |
+            logs/*.jsonl
+            logs/progress.svg
+          if-no-files-found: warn
+
+      - name: Progress summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## 📈 Прогресс обучения"
+            echo ""
+            if [ -f logs/progress.svg ]; then
+              echo "![]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+              # ссылка на артефакт; сам SVG покажем как вложение при наличии
+            fi
+            echo "| шаг | loss |"
+            echo "| --- | --- |"
+            for f in logs/step_*.jsonl; do
+              [ -f "$f" ] || continue
+              first=$(python -c "import json,sys;d=[json.loads(l) for l in open('$f')];e=[x for x in d if x.get('event')=='train'];print(e[0]['loss'] if e else '-')" 2>/dev/null)
+              last=$(python -c "import json,sys;d=[json.loads(l) for l in open('$f')];e=[x for x in d if x.get('event')=='train'];print(e[-1]['loss'] if e else '-')" 2>/dev/null)
+              echo "| \`$(basename "$f")\` | $first → $last |"
+            done
+            echo ""
+            echo "График и логи — в артефакте \`training-progress\`."
+          } >> "$GITHUB_STEP_SUMMARY"
