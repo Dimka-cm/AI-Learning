@@ -119,6 +119,39 @@
 
 ---
 
+### 2026-09-21 — профиль дообучения по большому опросу владельца
+
+**Что выбрал владелец:** модель должна быть русским ПК-агентом «всё сразу»:
+живой разговор, программирование, Minecraft Forge/NeoForge/Fabric/Mixins/Gradle,
+UE5/Blueprint, математика, файлы/команды/Gradle/позже экран и мышка. Стиль — на
+«ты», как к владельцу/создателю; дружелюбно, спокойно, как друг, можно грубовато
+и с юмором, но без оскорблений. Если не знает — честно говорит «не знаю» и
+предлагает поискать, не выдумывает.
+
+**Что зафиксировано в репозитории:**
+
+- `config/training_profile.yaml` — машинно-читаемое ТЗ по стилю, доменам, данным,
+  безопасности ПК-агента и первому Actions-прогону.
+- `docs/TRAINING_PLAN.md` — человекочитаемый план дообучения.
+- `eval/model_quality_prompts.yaml` — проверочные вопросы по чату, поведению,
+  безопасности, математике, Python, C/C++/C#/Java/JS/TS/Kotlin, Minecraft/Gradle/UE5.
+- `scripts/make_data.py` расширен: демо-корпус теперь включает Python, Java,
+  JavaScript/TypeScript, Kotlin, Gradle Groovy/Kotlin DSL, Mixins, NeoForge/Fabric,
+  UE5 C++ и Blueprint, плюс стиль владельца и правила безопасности.
+- `scripts/evaluate_prompts.py` — после обучения генерирует `logs/eval_answers.md`
+  по eval-промптам.
+- `.github/workflows/pipeline.yml` после обучения запускает пробные ответы и кладёт
+  `logs/eval_answers.md` в артефакт.
+
+**Первый целевой прогон Actions:** workflow «Дообучение в Actions» с
+`data_source=hf`, `hf_dataset=Imperius/ru-classic`, `data_limit_mb=25`,
+`start_step=1`, `end_step=2`, `max_steps=300`. Успех: есть `last.pt`,
+`progress.svg`, loss падает, пробные ответы на русском.
+
+**Важно:** PR не мержить. Глаза владелец доделывает отдельно и потом принесёт в `main`.
+
+---
+
 ### 2026-09-20 — сессия Arena, ветка `arena/01a0c067-ai-learning`
 
 **Запрос владельца:** применить `AI-Learning-fixes.patch`, проверить тесты, запушить

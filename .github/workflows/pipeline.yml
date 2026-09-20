@@ -152,7 +152,21 @@ jobs:
             --device cpu \
             --evaluate
 
-      - name: Выкачать прогресс (логи + график)
+      - name: Пробные ответы модели
+        if: always()
+        run: |
+          mkdir -p logs
+          if compgen -G "checkpoints/step_*/last.pt" > /dev/null; then
+            python scripts/evaluate_prompts.py \
+              --limit 12 \
+              --out logs/eval_answers.md || true
+          else
+            echo "# Пробные ответы модели" > logs/eval_answers.md
+            echo "" >> logs/eval_answers.md
+            echo "Чекпоинт не найден — генерацию ответов пропускаю." >> logs/eval_answers.md
+          fi
+
+      - name: Выкачать прогресс (логи + график + пробные ответы)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -160,6 +174,7 @@ jobs:
           path: |
             logs/*.jsonl
             logs/progress.svg
+            logs/eval_answers.md
             checkpoints/**/*.pt
           if-no-files-found: warn
 
@@ -181,5 +196,11 @@ jobs:
             echo ""
             if [ -f logs/progress.svg ]; then
               echo "График loss сохранён в артефакт \`ci-checkpoint-progress\`."
+            fi
+            if [ -f logs/eval_answers.md ]; then
+              echo ""
+              echo "### Пробные ответы"
+              echo ""
+              sed -n '1,120p' logs/eval_answers.md
             fi
           } >> "$GITHUB_STEP_SUMMARY"
