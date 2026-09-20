@@ -100,7 +100,14 @@ jobs:
           MAX_STEPS: ${{ github.event.inputs.max_steps || '0' }}
           EPOCHS_PER_STEP: "1"
           LOG_EVERY_STEPS: "5"
+          NUM_WORKERS: "auto"
+          OMP_NUM_THREADS: "auto"
         run: |
+          NPROC=$(nproc)
+          # auto => все ядра раннера (2 на приватном, 4 на публичном)
+          echo "OMP_NUM_THREADS=$NPROC" >> "$GITHUB_ENV"
+          echo "NUM_WORKERS=$NPROC" >> "$GITHUB_ENV"
+          echo "Раннер: $NPROC ядер CPU, $(free -m | awk '/Mem:/{print $2}') МБ RAM"
           python orchestrator.py \
             --start ${{ github.event.inputs.start_step || 1 }} \
             --end ${{ github.event.inputs.end_step || 2 }} \

@@ -38,19 +38,32 @@ def parse_args():
 
 
 def make_batch_fn(cfg, data, device):
-    """Генератор батчей (batch_size, block_size) со случайными окнами."""
-    g = torch.Generator()
+    """Генератор батчей через DataLoader (параллельная сборка на num_workers ядер)."""
+    import torch
+    from torch.utils.data import DataLoader, IterableDataset
+
+    class ShardIter(IterableDataset):
+        def __iter__(self):
+            g = torch.Generator()
+            B = cfg.batch_size
+            n = len(data) - cfg.block_size
+            while True:
+                idx = torch.randint(0, n, (B,), generator=g).tolist()
+                xs = torch.stack([torch.from_numpy(data[i:i + cfg.block_size].astype("int64"))
+                                  for i in idx])
+                ys = torch.stack([torch.from_numpy(data[i + 1:i + 1 + cfg.block_size].astype("int64"))
+                                  for i in idx])
+                yield {"input_ids": xs, "labels": ys}
+
+    kwargs = {}
+    if device == "cpu" and getattr(cfg, "num_workers", 0) > 0:
+        kwargs = {"num_workers": cfg.num_workers, "persistent_workers": False}
+    dl = DataLoader(ShardIter(), batch_size=None, **kwargs)
 
     def gen():
-        B = cfg.batch_size
-        n = len(data) - cfg.block_size
-        while True:
-            idx = torch.randint(0, n, (B,), generator=g).tolist()
-            xs = torch.stack([torch.from_numpy(data[i:i + cfg.block_size].astype("int64"))
-                              for i in idx])
-            ys = torch.stack([torch.from_numpy(data[i + 1:i + 1 + cfg.block_size].astype("int64"))
-                              for i in idx])
-            yield {"input_ids": xs.to(device), "labels": ys.to(device)}
+        for batch in dl:
+            yield {"input_ids": batch["input_ids"].to(device),
+                   "labels": batch["labels"].to(device)}
 
     return gen
 

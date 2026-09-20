@@ -83,6 +83,7 @@ class CFG:
             "MODEL_NAME": "model_name",
             "FP16": "fp16",
             "LOG_EVERY_STEPS": "log_every_steps",
+            "NUM_WORKERS": "num_workers",
         }
         for env, attr in overrides.items():
             v = os.environ.get(env)
