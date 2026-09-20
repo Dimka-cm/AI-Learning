@@ -60,6 +60,17 @@ on:
       - "orchestrator.py"
       - ".github/workflows/train.yml"
       - ".github/workflows/pipeline.yml"
+  # Смоук прямо на pull_request: весь пайплайн (данные -> токенизация -> обучение
+  # -> чекпоинт -> график) прогоняется на демо-корпусе за минуты. Так починка
+  # доказывается сама, ещё до мержа в main.
+  pull_request:
+    paths:
+      - "config/**"
+      - "src/**"
+      - "steps/**"
+      - "scripts/**"
+      - "orchestrator.py"
+      - ".github/workflows/pipeline.yml"
 
 concurrency:
   group: ci-train-${{ github.ref }}
@@ -74,7 +85,8 @@ env:
 jobs:
   finetune:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # На PR — короткий смоук, чтобы проверка не висела часами.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 300 }}
 
     steps:
       - name: Checkout
@@ -104,20 +116,22 @@ jobs:
             hf-${{ runner.os }}-rugpt3-
 
       - name: Данные (Drive / датасет / демо) + токенизация
-        # Потолок по времени: шаг данных не должен съедать всю джобу (300 мин).
+        # Потолок по времени: шаг данных не должен съедать всю джобу.
         timeout-minutes: 30
         env:
-          DATA_SOURCE: ${{ github.event.inputs.data_source || 'auto' }}
+          # На PR — всегда демо (мгновенно, без сети к Drive).
+          DATA_SOURCE: ${{ github.event.inputs.data_source || (github.event_name == 'pull_request' && 'demo' || 'auto') }}
           DRIVE_FOLDER_URL: ${{ github.event.inputs.drive_folder_url || 'https://drive.google.com/drive/folders/1u_rcfQ6P50bK4H23tmrh20U_2BRDVEm5' }}
           # Пусто -> берём ru-classic: если Drive не отдаст текст, каскад дойдёт до HF.
           HF_DATASET: ${{ github.event.inputs.hf_dataset || 'Imperius/ru-classic' }}
-          LIMIT_MB: ${{ github.event.inputs.data_limit_mb || '25' }}
+          LIMIT_MB: ${{ github.event.inputs.data_limit_mb || (github.event_name == 'pull_request' && '5' || '25') }}
           DRIVE_BUDGET_S: "900"    # на папку Drive — максимум 15 минут
         run: python steps/step_00_ci_data.py
 
       - name: Дообучение шагов ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || 2 }}
         env:
-          MAX_STEPS: ${{ github.event.inputs.max_steps || '0' }}
+          # На PR — 60 итераций: проверяем, что цикл живой, а не гоним эпохи.
+          MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'pull_request' && '60' || '0') }}
           EPOCHS_PER_STEP: "1"
           LOG_EVERY_STEPS: "5"
           NUM_WORKERS: "auto"
