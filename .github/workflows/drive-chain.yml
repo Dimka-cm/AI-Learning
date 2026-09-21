@@ -135,15 +135,49 @@ jobs:
           github-token: ${{ github.token }}
           path: seed-artifact
 
-      - name: Восстановить checkpoint seed-run
+      - name: Восстановить только финальный checkpoint seed-run
         run: |
           set -euo pipefail
-          if [ ! -d seed-artifact/checkpoints ]; then
-            echo "seed-artifact/checkpoints not found"
-            find seed-artifact -maxdepth 4 -type f -print || true
-            exit 1
-          fi
-          cp -a seed-artifact/checkpoints ./checkpoints
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import shutil
+          import sys
+
+          root = Path('seed-artifact/checkpoints')
+          if not root.is_dir():
+              print('seed-artifact/checkpoints not found')
+              for p in Path('seed-artifact').glob('**/*'):
+                  if p.is_file():
+                      print(p, p.stat().st_size)
+              sys.exit(1)
+
+          # Нужен только один последний checkpoint, иначе копирование всего
+          # seed-артефакта дублирует гигабайты и может забить диск раннера.
+          cands = list(root.glob('step_*/last.pt'))
+          if not cands:
+              cands = list(root.glob('step_*/last-*.pt'))
+          if not cands:
+              print('no checkpoint files in seed artifact')
+              for p in root.glob('**/*'):
+                  if p.is_file():
+                      print(p, p.stat().st_size)
+              sys.exit(1)
+
+          def key(p: Path):
+              m_step = re.search(r'step_(\d+)', str(p))
+              m_last = re.search(r'last(?:-(\d+))?\.pt$', p.name)
+              return (int(m_step.group(1) if m_step else 0), int(m_last.group(1) or 0 if m_last else 0), p.stat().st_mtime)
+
+          src = sorted(cands, key=key)[-1]
+          rel = src.relative_to(root)
+          dst = Path('checkpoints') / rel
+          shutil.rmtree('checkpoints', ignore_errors=True)
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          shutil.move(str(src), str(dst))
+          shutil.rmtree('seed-artifact', ignore_errors=True)
+          print(f'restored {src} -> {dst} ({dst.stat().st_size} bytes)')
+          PY
           find checkpoints -maxdepth 3 -type f -name 'last*.pt' -printf '%p %s bytes\n'
 
       - name: Обучить merged_data_1.txt

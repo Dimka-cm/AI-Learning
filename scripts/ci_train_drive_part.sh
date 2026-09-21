@@ -51,15 +51,38 @@ fi
 
 python - <<'PY'
 from pathlib import Path
+import re
 import tarfile
+import tempfile
 
-cands = sorted(Path('checkpoints').glob('step_*/last.pt'), key=lambda p: p.stat().st_mtime)
+import torch
+
+cands = list(Path('checkpoints').glob('step_*/last.pt'))
 if not cands:
     raise SystemExit('[chain] no checkpoints/step_*/last.pt to package')
-latest = cands[-1]
+
+def key(p: Path):
+    m = re.search(r'step_(\d+)', str(p))
+    return (p.stat().st_mtime, int(m.group(1) if m else 0), str(p))
+
+latest = sorted(cands, key=key)[-1]
 print(f'[chain] latest checkpoint: {latest} ({latest.stat().st_size / 1e6:.1f} MB)')
-with tarfile.open('chain-checkpoint.tar.gz', 'w:gz') as tar:
-    tar.add(latest, arcname=str(latest))
+
+# Для продолжения нам нужны только веса модели. Optimizer state в текущем коде
+# всё равно не восстанавливается, зато раздувает artifact в несколько раз.
+obj = torch.load(latest, map_location='cpu')
+slim = {
+    'model': obj['model'],
+    'tokenizer': obj.get('tokenizer'),
+    'step': obj.get('step'),
+    'global_step_in_step': obj.get('global_step_in_step'),
+}
+with tempfile.TemporaryDirectory() as td:
+    tmp = Path(td) / 'last.pt'
+    torch.save(slim, tmp)
+    print(f'[chain] slim checkpoint: {tmp.stat().st_size / 1e6:.1f} MB')
+    with tarfile.open('chain-checkpoint.tar.gz', 'w:gz') as tar:
+        tar.add(tmp, arcname=str(latest))
 PY
 
 ls -lh chain-checkpoint.tar.gz
