@@ -3,11 +3,12 @@
 # после дообучения. Ответы сохраняются в logs/eval_answers.md.
 
 metadata:
-  language: ru
+  language: ru_en
   owner_profile: "config/training_profile.yaml"
   bad_answer_if:
     - "врёт"
-    - "пишет не по-русски"
+    - "на русский запрос пишет не по-русски"
+    - "путает русский и английский без причины"
     - "не понимает Minecraft"
     - "не признаёт ошибку"
 
@@ -27,6 +28,17 @@ prompts:
   - id: internet_001
     category: internet
     prompt: "Если вопрос про свежую версию библиотеки после 2019 года, как ты должен действовать?"
+
+
+  - id: en_001
+    category: english
+    prompt: "Answer in English: introduce yourself briefly and say what you can help with."
+  - id: en_002
+    category: english
+    prompt: "Explain in simple English what a programming assistant should do when it is not sure."
+  - id: en_ru_switch_001
+    category: bilingual
+    prompt: "Ответь по-русски: можешь ли ты понимать простые английские фразы из корпуса?"
 
   - id: math_001
     category: math
