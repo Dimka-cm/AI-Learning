@@ -1,13 +1,12 @@
-# Автоцепочка для оставшихся частей Drive-корпуса.
-# Этот workflow стартует от push и сам ждёт завершения seed_resume_run_id.
+# Автоцепочка для всего Drive-корпуса без огромного seed-артефакта.
+# Старый seed-run merged_data_7.txt успешен, но его artifact вышел ~44 ГБ,
+# поэтому цепочка переучивает 7-ю часть первой и дальше передаёт slim-checkpoint.
 
 enabled: true
-
-# Run, который сейчас обучает merged_data_7.txt. После его успеха цепочка пойдёт по 1..6.
-seed_resume_run_id: "35542629976"
+seed_resume_run_id: ""
 
 drive_folder_url: "https://drive.google.com/drive/folders/1u_rcfQ6P50bK4H23tmrh20U_2BRDVEm5?usp=drive_link"
-parts: [1, 2, 3, 4, 5, 6]
+parts: [7, 1, 2, 3, 4, 5, 6]
 
 data_limit_mb: 2000
 drive_budget_s: 3600
