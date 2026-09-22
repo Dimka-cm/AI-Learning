@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,131 @@ DOMAIN_SHARDS = {
     "behavior": (9, 10),
 }
 
+
+# Распознаём Q/A-диалоги, чтобы не разрывать пару «вопрос -> ответ» между
+# разными shard. Это важно для корпуса владельца: там много вручную написанных
+# русских вопрос-ответов. Если вопрос и ответ попадут в разные порции, модель
+# хуже выучит именно формат диалога.
+QUESTION_PREFIX_RE = re.compile(
+    r"^\s*(пользователь|user|human|человек|вопрос|q)\s*[:：-]",
+    re.IGNORECASE,
+)
+ANSWER_PREFIX_RE = re.compile(
+    r"^\s*(агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+INLINE_ANSWER_RE = re.compile(
+    r"(агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+SPEAKER_PREFIX_RE = re.compile(
+    r"^\s*(пользователь|user|human|человек|вопрос|q|агент|assistant|ассистент|бот|модель|ответ|a)\s*[:：-]",
+    re.IGNORECASE,
+)
+
+
+def iter_training_units(fh):
+    """Поток учебных блоков из txt.
+
+    Обычная проза остаётся построчной. Диалоги вида:
+
+        Пользователь: вопрос
+        Агент: ответ
+        Пользователь: следующий вопрос
+        Агент: следующий ответ
+
+    группируются парами/блоками, чтобы round-robin раскладка по shards не
+    отправила вопрос в shard_01, а ответ — в shard_02. Пустая строка тоже
+    завершает текущий блок, поэтому формат с blank-line-separated Q/A работает.
+
+    Yield: (text, raw_line_count).
+    """
+    block: list[str] = []
+    raw_count = 0
+    has_answer = False
+
+    def flush():
+        nonlocal block, raw_count, has_answer
+        if not block:
+            return None
+        item = ("\n".join(block), raw_count)
+        block = []
+        raw_count = 0
+        has_answer = False
+        return item
+
+    for raw_line in fh:
+        line = raw_line.strip()
+        if not line:
+            item = flush()
+            if item is not None:
+                yield item
+            continue
+
+        is_question = bool(QUESTION_PREFIX_RE.match(line))
+        is_answer = bool(ANSWER_PREFIX_RE.match(line))
+        has_inline_answer = bool(INLINE_ANSWER_RE.search(line))
+        has_speaker = bool(SPEAKER_PREFIX_RE.match(line))
+
+        if has_speaker:
+            # Новый вопрос после уже увиденного ответа = новая Q/A-пара.
+            if is_question and block and has_answer:
+                item = flush()
+                if item is not None:
+                    yield item
+            block.append(line)
+            raw_count += 1
+            has_answer = has_answer or is_answer or has_inline_answer
+            continue
+
+        if block:
+            # Продолжение многострочного вопроса/ответа. Защита от слишком
+            # огромного блока: если в txt нет пустых строк, режем по 40 строкам.
+            block.append(line)
+            raw_count += 1
+            if raw_count >= 40:
+                item = flush()
+                if item is not None:
+                    yield item
+            continue
+
+        # Обычная строка прозы/кода без Q/A-маркеров.
+        yield line, 1
+
+    item = flush()
+    if item is not None:
+        yield item
+
+
+
+
+def _encode_units(tok, units: list[str]) -> list[list[int]]:
+    """Батчевое кодирование текстовых блоков.
+
+    46+ млн строк нельзя токенизировать по одной: это миллионы Python-вызовов.
+    Fast tokenizer умеет принимать список строк, поэтому кодируем пачками.
+    Для простых моков/старых токенизаторов оставлен fallback на построчный вызов.
+    """
+    if not units:
+        return []
+    try:
+        encoded = tok(units, add_special_tokens=False)["input_ids"]
+    except TypeError:
+        encoded = [tok(unit)["input_ids"] for unit in units]
+    # Некоторые токенизаторы для одной строки возвращают list[int]. Здесь units
+    # всегда список, но оставим защиту, чтобы тестовые моки не ломались.
+    if encoded and isinstance(encoded[0], int):
+        return [encoded]
+    return encoded
+
+
+def append_token_batch(tok, items: list[tuple[int, str]], eos: int, buffer: dict[int, list[int]], flush) -> None:
+    """Токенизирует пачку (shard, text) и раскладывает ids по буферам shard."""
+    encoded = _encode_units(tok, [unit for _, unit in items])
+    for (shard, _unit), ids in zip(items, encoded):
+        buffer[shard].extend(list(ids) + [eos])
+        if len(buffer[shard]) > 500_000:
+            flush(shard)
 
 def main() -> int:
     cfg = get_cfg()
@@ -73,7 +199,7 @@ def main() -> int:
     legacy = sorted(
         os.path.join(raw_dir, f) for f in os.listdir(raw_dir)
         if f.endswith(".txt") and os.path.isfile(os.path.join(raw_dir, f))
-    )
+    ) if os.path.isdir(raw_dir) else []
     if legacy:
         print(f"[legacy] {len(legacy)} файлов в корне data/raw -> round-robin")
         for p in legacy:
@@ -81,6 +207,8 @@ def main() -> int:
 
     # читаем потоком, не держим весь корпус в памяти
     buffer: dict[int, list[int]] = {s: [] for s in range(1, cfg.shards + 1)}
+    tokenize_batch_size = max(1, int(os.environ.get("TOKENIZE_BATCH_SIZE", "1024")))
+    print(f"[token] batch_size={tokenize_batch_size} учебных блоков")
 
     def flush(s: int):
         if buffer[s]:
@@ -103,32 +231,51 @@ def main() -> int:
             continue
         span = hi - lo + 1
         file_lines = 0
+        file_units = 0
+        pending: list[tuple[int, str]] = []
         with fh:
-            for i, line in enumerate(fh):
-                line = line.strip()
-                if not line:
-                    continue
-                # каждая строка идёт в свой шард диапазона домена (равномерно)
+            for i, (unit, raw_lines) in enumerate(iter_training_units(fh)):
+                # каждый учебный блок идёт в свой шард диапазона домена
+                # (равномерно), но Q/A-пара остаётся внутри одного блока.
                 s = lo + (i % span)
-                ids = tok(line)["input_ids"] + [eos]
-                buffer[s].extend(ids)
-                if len(buffer[s]) > 500_000:
-                    flush(s)
-                file_lines += 1
-                lines_done += 1
+                pending.append((s, unit))
+                if len(pending) >= tokenize_batch_size:
+                    append_token_batch(tok, pending, eos, buffer, flush)
+                    pending.clear()
+                file_units += 1
+                file_lines += raw_lines
+                lines_done += raw_lines
                 if lines_done % 200_000 == 0:
                     mins = (time.time() - started) / 60
                     print(f"[token] строк {lines_done:,} за {mins:.1f} мин "
                           f"({lines_done / max(mins, 1e-6) / 1000:.0f} тыс. строк/мин)", flush=True)
-        print(f"[token] {os.path.basename(path)}: {file_lines:,} строк", flush=True)
+        if pending:
+            append_token_batch(tok, pending, eos, buffer, flush)
+        print(f"[token] {os.path.basename(path)}: {file_lines:,} строк, "
+              f"{file_units:,} учебных блоков", flush=True)
 
     for s in range(1, cfg.shards + 1):
         flush(s)
 
-    print("\n[токенов в порции]")
+    need = cfg.block_size + 2  # ровно столько нужно для одного окна обучения
+    print(f"\n[токенов в порции] (для обучения нужно минимум {need:,})")
+    small = []
     for s in range(1, cfg.shards + 1):
         mb = targets[s] * np.dtype(npdtype).itemsize / 1e6
-        print(f"  shard_{s:02d}: {targets[s]:,} токенов ({mb:.1f} MB)")
+        mark = ""
+        if targets[s] == 0:
+            mark = "  <- пусто: нет .txt для этого домена"
+            small.append(s)
+        elif targets[s] < need:
+            mark = f"  <- мало (меньше {need:,}): данные будут повторены"
+            small.append(s)
+        print(f"  shard_{s:02d}: {targets[s]:,} токенов ({mb:.1f} MB){mark}")
+
+    if small:
+        print("\n[!] Не все порции готовы к обучению. Домены по порциям:")
+        for domain, (lo, hi) in DOMAIN_SHARDS.items():
+            print(f"    {domain}: порции {lo}..{hi}")
+        print("    Добавь .txt в нужную папку data/raw/<домен>/ и запусти шаг заново.")
     return 0
 
 

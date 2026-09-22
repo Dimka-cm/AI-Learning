@@ -14,9 +14,27 @@ def token_id_dtype(cfg: CFG):
     return np.uint32 if cfg.dtype == "uint32" else np.uint16
 
 
+def shard_path(cfg: CFG, step: int) -> str:
+    return cfg.p(cfg.tokenized_dir, f"shard_{step:02d}.bin")
+
+
+def shard_token_count(cfg: CFG, step: int) -> int:
+    """Сколько токенов в порции. 0 — файла нет или он пустой."""
+    p = shard_path(cfg, step)
+    if not os.path.exists(p):
+        return 0
+    return int(os.path.getsize(p) // np.dtype(token_id_dtype(cfg)).itemsize)
+
+
 def load_shard(cfg: CFG, step: int) -> np.ndarray:
-    """Читает токенизированную порцию шага (data/shards/shard_XX.bin) в память."""
-    p = cfg.p(cfg.tokenized_dir, f"shard_{step:02d}.bin")
+    """Читает токенизированную порцию шага (data/shards/shard_XX.bin) в память.
+
+    Если порция меньше, чем нужно для одного окна обучения (block_size + 2),
+    данные повторяются до нужного размера, с предупреждением в лог. Так демо-корпус
+    и маленькие домены не валят прогон: «Слишком мало токенов: 232 < 258» больше
+    не роняет шаг — модель просто несколько раз увидит один и тот же кусок.
+    """
+    p = shard_path(cfg, step)
     if not os.path.exists(p):
         raise FileNotFoundError(
             f"Нет {p}. Сначала запусти steps/step_00_prepare.py "
@@ -25,24 +43,68 @@ def load_shard(cfg: CFG, step: int) -> np.ndarray:
     arr = np.fromfile(p, dtype=token_id_dtype(cfg))
     if arr.ndim != 1:
         arr = arr.reshape(-1)
-    if arr.size < cfg.block_size + 2:
-        raise ValueError(f"Слишком мало токенов в shard_{step:02d}: {arr.size} < block_size+2")
+
+    need = cfg.block_size + 2
+    if arr.size == 0:
+        raise ValueError(
+            f"Порция shard_{step:02d} пустая: в ней нет ни одного токена.\n"
+            f"  Причина: для этого домена не нашлось .txt в {cfg.text_dir}/.\n"
+            f"  Что делать: положи текст в нужную папку домена и запусти "
+            f"python steps/step_00_prepare.py заново."
+        )
+    if arr.size < need:
+        reps = int(np.ceil(need / arr.size))
+        print(f"[data] в shard_{step:02d} всего {arr.size} токенов — меньше окна "
+              f"({need}). Повторяю данные x{reps}, чтобы обучение прошло. "
+              f"Для качества добавь текста (см. docs/DATA.md).")
+        arr = np.tile(arr, reps)
     return arr
 
 
-def find_resume_checkpoint(cfg: CFG, step: int) -> Optional[str]:
-    """Последний чекпоинт: сначала в папке текущего шага, затем предыдущего и т.д."""
-    for s in range(step, 0, -1):
+def _checkpoint_candidates(cfg: CFG, steps) -> list[tuple[float, int, int, str]]:
+    """Все last*.pt как (mtime, step, suffix, path)."""
+    out: list[tuple[float, int, int, str]] = []
+    for s in steps:
         d = cfg.p(cfg.checkpoints_dir, f"step_{s:02d}")
-        if os.path.isdir(d):
-            candidates = []
-            for f in os.listdir(d):
-                m = re.match(r"last(?:-(\d+))?\.pt$", f)
-                if m:
-                    candidates.append((int(m.group(1) or 0), f))
-            if candidates:
-                candidates.sort()
-                return os.path.join(d, candidates[-1][1])
+        if not os.path.isdir(d):
+            continue
+        for f in os.listdir(d):
+            m = re.match(r"last(?:-(\d+))?\.pt$", f)
+            if not m:
+                continue
+            path = os.path.join(d, f)
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                mtime = 0.0
+            out.append((mtime, s, int(m.group(1) or 0), path))
+    return out
+
+
+def find_resume_checkpoint(cfg: CFG, step: int) -> Optional[str]:
+    """Последний чекпоинт для резюме.
+
+    Обычный режим: сначала папка текущего шага, затем предыдущего и т.д.
+
+    Режим RESUME_FROM_LATEST=1 нужен для обучения большого корпуса по частям в
+    разных GitHub Actions runs. После скачивания артефакта прошлого run шаг 01
+    должен стартовать не с собственного старого step_01, а с финального/самого
+    свежего чекпоинта прошлой части; дальше внутри run каждый следующий шаг
+    продолжает уже свежесохранённый предыдущий.
+    """
+    latest_any = (os.environ.get("RESUME_FROM_LATEST") or "").strip().lower()
+    if latest_any in ("1", "true", "yes", "latest"):
+        candidates = _checkpoint_candidates(cfg, range(1, cfg.shards + 1))
+        if candidates:
+            candidates.sort()
+            return candidates[-1][3]
+        return None
+
+    for s in range(step, 0, -1):
+        candidates = _checkpoint_candidates(cfg, [s])
+        if candidates:
+            candidates.sort()
+            return candidates[-1][3]
     return None
 
 

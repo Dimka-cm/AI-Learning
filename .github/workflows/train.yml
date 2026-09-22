@@ -41,6 +41,11 @@ on:
         required: false
         default: "0"
         type: string
+      drive_folder_url:
+        description: "Ссылка на папку Google Drive с .txt"
+        required: false
+        default: ""
+        type: string
       data_source:
         description: "Откуда данные: auto / demo (быстро) / drive / hf"
         required: true
@@ -55,6 +60,26 @@ on:
         description: "Потолок объёма данных, МБ (0 = без потолка)"
         required: false
         default: "25"
+        type: string
+      drive_file_regex:
+        description: "Drive: regex имени .txt (например part_07); пусто = любые"
+        required: false
+        default: ""
+        type: string
+      drive_max_files:
+        description: "Drive: максимум .txt после фильтра (0 = сколько влезет)"
+        required: false
+        default: "0"
+        type: string
+      drive_budget_s:
+        description: "Drive: лимит времени скачивания в секундах"
+        required: false
+        default: "3600"
+        type: string
+      resume_run_id:
+        description: "ID прошлого run, откуда скачать артефакт с checkpoints для продолжения"
+        required: false
+        default: ""
         type: string
   push:
     branches: [main]
@@ -76,7 +101,11 @@ env:
   MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'push' && '40' || '0') }}
   # По push данных в свежем чекауте нет: демо-корпус, чтобы пайплайн доехал.
   DATA_SOURCE: ${{ github.event.inputs.data_source || (github.event_name == 'push' && 'demo' || 'auto') }}
+  DRIVE_FOLDER_URL: ${{ github.event.inputs.drive_folder_url || 'https://drive.google.com/drive/folders/1u_rcfQ6P50bK4H23tmrh20U_2BRDVEm5' }}
   LIMIT_MB: ${{ github.event.inputs.data_limit_mb || '25' }}
+  DRIVE_INCLUDE_REGEX: ${{ github.event.inputs.drive_file_regex || '' }}
+  DRIVE_MAX_FILES: ${{ github.event.inputs.drive_max_files || '0' }}
+  DRIVE_BUDGET_S: ${{ github.event.inputs.drive_budget_s || '3600' }}
 
 jobs:
   train:
@@ -102,15 +131,26 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Восстановить чекпоинт из прошлого запуска
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: training-progress
+          run-id: ${{ github.event.inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: .
+
       - name: Данные (свои .txt / Drive / HF / демо) + токенизация
         # Раньше здесь был `--prepare`: на свежем чекауте данных нет, и шаги
         # падали с FileNotFoundError. Теперь данные гарантированно находятся.
-        timeout-minutes: 30
+        timeout-minutes: 120
         run: python steps/step_00_ci_data.py
         env:
           CUDA_VISIBLE_DEVICES: ""
 
       - name: Train steps ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || (github.event_name == 'push' && 2 || 10) }}
+        env:
+          RESUME_FROM_LATEST: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' && '1' || '' }}
         run: >
           python orchestrator.py
           --start ${{ github.event.inputs.start_step || 1 }}

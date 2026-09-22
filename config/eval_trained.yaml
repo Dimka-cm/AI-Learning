@@ -1,0 +1,8 @@
+# Тест уже обученной цепочки Drive-корпуса.
+# Берёт финальный slim-checkpoint из chain run и генерирует ответы по eval/prompts.
+
+enabled: true
+source_run_id: "35573224830"
+artifact_name: "chain-checkpoint-part-6"
+prompt_limit: 0          # 0 = все prompts, включая русский/английский/code/math/Minecraft/UE5
+max_new_tokens: 96

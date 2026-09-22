@@ -18,7 +18,8 @@ jobs:
       - name: Зависимости
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install numpy pytest pillow cairosvg
+          # pyyaml — для тестов пайплайна (src/config.py читает train.yaml)
+          pip install numpy pytest pillow cairosvg pyyaml
       - name: Ассеты UE5
         run: python tools/fetch_ue5_assets.py --token "${{ github.token }}"
       - name: Тесты

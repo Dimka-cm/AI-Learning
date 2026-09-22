@@ -14,7 +14,11 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import torch
+from src.threads import fix_thread_env
+
+fix_thread_env()  # OMP_NUM_THREADS обязан быть числом, иначе ругается libgomp
+
+import torch  # noqa: E402
 
 from src.config import get_cfg, get_cfg_ci
 from src.trainer import Trainer

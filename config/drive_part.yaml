@@ -1,0 +1,26 @@
+# Автозапуск обучения одной части Drive-корпуса через push.
+# Агент обновляет этот файл и пушит ветку — GitHub Actions стартует сам,
+# без workflow_dispatch и без пользовательского PAT.
+
+enabled: false
+
+# Папка Google Drive `library` с файлами merged_data_1.txt ... merged_data_7.txt.
+drive_folder_url: "https://drive.google.com/drive/folders/1u_rcfQ6P50bK4H23tmrh20U_2BRDVEm5?usp=drive_link"
+
+# Какая часть корпуса сейчас обучается. Для следующих частей меняй 7 -> 1..6.
+drive_file_regex: "^merged_data_7\\.txt$"
+drive_max_files: 1
+
+# Последняя часть ~460 МБ, поэтому 600 МБ достаточно. Для частей 1..6 ставь 1200-2000.
+data_limit_mb: 600
+drive_budget_s: 3600
+
+# Русский text-домен раскладывается в shard_01..04.
+start_step: 1
+end_step: 4
+max_steps: 300
+
+# Для первой части пусто. Для следующей части укажи ID успешного run предыдущей части.
+resume_run_id: ""
+
+eval_limit: 12

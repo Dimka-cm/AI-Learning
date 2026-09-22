@@ -7,6 +7,8 @@ from typing import Any, Dict
 
 import yaml
 
+from .threads import default_threads, fix_thread_env
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -75,6 +77,7 @@ class CFG:
 
     def apply_env_overrides(self) -> "CFG":
         """Переопределение из переменных окружения (использует GitHub Actions)."""
+        fix_thread_env()  # до torch/numpy: OMP_NUM_THREADS обязан быть числом
         overrides = {
             "MAX_STEPS": "max_steps",
             "EPOCHS_PER_STEP": "epochs_per_step",
@@ -87,14 +90,25 @@ class CFG:
         }
         for env, attr in overrides.items():
             v = os.environ.get(env)
-            if v not in (None, ""):
+            if v in (None, ""):
+                continue
+            v = v.strip()
+            if attr == "model_name":
+                setattr(self, attr, v)
+            elif attr == "fp16":
+                setattr(self, attr, v.lower() in ("1", "true", "yes"))
+            elif attr == "num_workers":
+                # "auto" (так ставят workflows) — это не число: берём ядра минус одно.
+                if v.lower() in ("auto", "none", "default"):
+                    setattr(self, attr, default_threads())
+                else:
+                    try:
+                        setattr(self, attr, max(1, int(v)))
+                    except ValueError:
+                        pass
+            else:
                 try:
-                    if attr in ("model_name",):
-                        setattr(self, attr, v)
-                    elif attr == "fp16":
-                        setattr(self, attr, v.strip().lower() in ("1", "true", "yes"))
-                    else:
-                        setattr(self, attr, int(v))
+                    setattr(self, attr, int(v))
                 except ValueError:
                     pass
         return self

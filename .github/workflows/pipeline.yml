@@ -34,6 +34,26 @@ on:
         required: false
         default: "25"
         type: string
+      drive_file_regex:
+        description: "Drive: regex имени .txt (например part_07); пусто = любые"
+        required: false
+        default: ""
+        type: string
+      drive_max_files:
+        description: "Drive: максимум .txt после фильтра (0 = сколько влезет)"
+        required: false
+        default: "0"
+        type: string
+      drive_budget_s:
+        description: "Drive: лимит времени скачивания в секундах"
+        required: false
+        default: "3600"
+        type: string
+      resume_run_id:
+        description: "ID прошлого run, откуда скачать ci-checkpoint-progress для продолжения"
+        required: false
+        default: ""
+        type: string
       start_step:
         description: "Первый шаг обучения"
         required: true
@@ -81,6 +101,9 @@ env:
   HF_HOME: ${{ github.workspace }}/hf-cache
   TORCH_HOME: ${{ github.workspace }}/torch-cache
   GRAD_CACHE: ${{ github.workspace }}/grad-cache
+  # Если в настройках репозитория добавлен секрет HF_TOKEN, скачивание с
+  # HuggingFace идёт быстрее и без предупреждений о лимите. Пусто — не мешает.
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
 jobs:
   finetune:
@@ -115,9 +138,18 @@ jobs:
           restore-keys: |
             hf-${{ runner.os }}-rugpt3-
 
+      - name: Восстановить чекпоинт из прошлого запуска
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-checkpoint-progress
+          run-id: ${{ github.event.inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: .
+
       - name: Данные (Drive / датасет / демо) + токенизация
-        # Потолок по времени: шаг данных не должен съедать всю джобу.
-        timeout-minutes: 30
+        # Потолок по времени: ручной Drive-прогон одной части может быть большим.
+        timeout-minutes: 120
         env:
           # На PR — всегда демо (мгновенно, без сети к Drive).
           DATA_SOURCE: ${{ github.event.inputs.data_source || (github.event_name == 'pull_request' && 'demo' || 'auto') }}
@@ -125,7 +157,9 @@ jobs:
           # Пусто -> берём ru-classic: если Drive не отдаст текст, каскад дойдёт до HF.
           HF_DATASET: ${{ github.event.inputs.hf_dataset || 'Imperius/ru-classic' }}
           LIMIT_MB: ${{ github.event.inputs.data_limit_mb || (github.event_name == 'pull_request' && '5' || '25') }}
-          DRIVE_BUDGET_S: "900"    # на папку Drive — максимум 15 минут
+          DRIVE_INCLUDE_REGEX: ${{ github.event.inputs.drive_file_regex || '' }}
+          DRIVE_MAX_FILES: ${{ github.event.inputs.drive_max_files || '0' }}
+          DRIVE_BUDGET_S: ${{ github.event.inputs.drive_budget_s || (github.event_name == 'workflow_dispatch' && '3600' || '900') }}
         run: python steps/step_00_ci_data.py
 
       - name: Дообучение шагов ${{ github.event.inputs.start_step || 1 }}..${{ github.event.inputs.end_step || 2 }}
@@ -134,21 +168,37 @@ jobs:
           MAX_STEPS: ${{ github.event.inputs.max_steps || (github.event_name == 'pull_request' && '60' || '0') }}
           EPOCHS_PER_STEP: "1"
           LOG_EVERY_STEPS: "5"
-          NUM_WORKERS: "auto"
-          OMP_NUM_THREADS: "auto"
+          RESUME_FROM_LATEST: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.resume_run_id != '' && '1' || '' }}
+          # ВАЖНО: NUM_WORKERS может быть "auto" (наша договорённость),
+          # а OMP_NUM_THREADS — НЕТ: libgomp понимает только число и падал
+          # с «Недопустимое значение переменной окружения OMP_NUM_THREADS».
         run: |
           NPROC=$(nproc)
-          # auto => все ядра раннера (2 на приватном, 4 на публичном)
-          echo "OMP_NUM_THREADS=$NPROC" >> "$GITHUB_ENV"
-          echo "NUM_WORKERS=$NPROC" >> "$GITHUB_ENV"
           echo "Раннер: $NPROC ядер CPU, $(free -m | awk '/Mem:/{print $2}') МБ RAM"
+          # Число потоков считаем здесь же и передаём дальше уже числом.
+          export OMP_NUM_THREADS=$NPROC
+          export NUM_WORKERS=auto
           python orchestrator.py \
             --start ${{ github.event.inputs.start_step || 1 }} \
             --end ${{ github.event.inputs.end_step || 2 }} \
             --device cpu \
             --evaluate
 
-      - name: Выкачать прогресс (логи + график)
+      - name: Пробные ответы модели
+        if: always()
+        run: |
+          mkdir -p logs
+          if compgen -G "checkpoints/step_*/last.pt" > /dev/null; then
+            python scripts/evaluate_prompts.py \
+              --limit 12 \
+              --out logs/eval_answers.md || true
+          else
+            echo "# Пробные ответы модели" > logs/eval_answers.md
+            echo "" >> logs/eval_answers.md
+            echo "Чекпоинт не найден — генерацию ответов пропускаю." >> logs/eval_answers.md
+          fi
+
+      - name: Выкачать прогресс (логи + график + пробные ответы)
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -156,6 +206,7 @@ jobs:
           path: |
             logs/*.jsonl
             logs/progress.svg
+            logs/eval_answers.md
             checkpoints/**/*.pt
           if-no-files-found: warn
 
@@ -177,5 +228,11 @@ jobs:
             echo ""
             if [ -f logs/progress.svg ]; then
               echo "График loss сохранён в артефакт \`ci-checkpoint-progress\`."
+            fi
+            if [ -f logs/eval_answers.md ]; then
+              echo ""
+              echo "### Пробные ответы"
+              echo ""
+              sed -n '1,120p' logs/eval_answers.md
             fi
           } >> "$GITHUB_STEP_SUMMARY"
