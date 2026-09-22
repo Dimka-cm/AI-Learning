@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 env:
@@ -92,7 +92,21 @@ jobs:
           python scripts/evaluate_prompts.py \
             --limit "${{ steps.cfg.outputs.prompt_limit }}" \
             --max-new-tokens "${{ steps.cfg.outputs.max_new_tokens }}" \
-            --out logs/final_eval_answers.md
+            --out eval/final_eval_answers.md
+
+      - name: Commit eval report
+        if: ${{ success() && steps.cfg.outputs.enabled == 'true' }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f eval/final_eval_answers.md
+          if git diff --cached --quiet; then
+            echo "Нет изменений в eval/final_eval_answers.md"
+          else
+            git commit -m "chore(eval): сохраняем тест обученной модели"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
 
       - name: Upload eval report
         if: always()
@@ -100,7 +114,7 @@ jobs:
         with:
           name: trained-model-eval
           path: |
-            logs/final_eval_answers.md
+            eval/final_eval_answers.md
           if-no-files-found: warn
           retention-days: 7
 
@@ -115,9 +129,9 @@ jobs:
             echo "- prompt_limit: \`${{ steps.cfg.outputs.prompt_limit }}\`"
             echo "- max_new_tokens: \`${{ steps.cfg.outputs.max_new_tokens }}\`"
             echo ""
-            if [ -f logs/final_eval_answers.md ]; then
+            if [ -f eval/final_eval_answers.md ]; then
               echo "### Первые строки отчёта"
-              sed -n '1,120p' logs/final_eval_answers.md
+              sed -n '1,120p' eval/final_eval_answers.md
             else
               echo "Отчёт не создан."
             fi
