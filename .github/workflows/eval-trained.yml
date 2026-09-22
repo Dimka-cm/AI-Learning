@@ -36,6 +36,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      - name: Установить PyYAML для чтения конфига
+        run: pip install pyyaml
+
       - name: Прочитать config/eval_trained.yaml
         id: cfg
         run: |
